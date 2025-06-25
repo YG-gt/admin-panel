@@ -62,8 +62,10 @@ function test_logAction($action) {
 
 // Mock HTTP request for testing
 function test_makeMatrixRequest($url, $method = 'GET', $data = null, $headers = []) {
-    // Mock successful response for testing
-    if (strpos($url, '/login') !== false) {
+    // Mock successful response for testing - order matters!
+    
+    // Login endpoint
+    if (strpos($url, '/_matrix/client/r0/login') !== false) {
         return [
             'success' => true,
             'response' => json_encode(['access_token' => 'test_token_123']),
@@ -71,7 +73,8 @@ function test_makeMatrixRequest($url, $method = 'GET', $data = null, $headers = 
         ];
     }
     
-    if (strpos($url, '/admin') !== false) {
+    // Admin verification endpoint (more specific first)
+    if (strpos($url, '/admin') !== false && strpos($url, '/users/') !== false) {
         return [
             'success' => true,
             'response' => json_encode(['admin' => true]),
@@ -79,7 +82,16 @@ function test_makeMatrixRequest($url, $method = 'GET', $data = null, $headers = 
         ];
     }
     
-    // Default response for other endpoints
+    // Users management endpoints
+    if (strpos($url, '/_synapse/admin/v2/users') !== false || strpos($url, '/users') !== false) {
+        return [
+            'success' => true,
+            'response' => json_encode(['result' => 'success']),
+            'http_code' => 200
+        ];
+    }
+    
+    // Default response for any other endpoints
     return [
         'success' => true,
         'response' => json_encode(['result' => 'success']),
