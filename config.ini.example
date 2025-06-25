@@ -1,0 +1,8 @@
+[matrix]
+server = "https://matrix.example.com"
+domain = "example.com"
+
+[security]
+log_file = "/var/log/paranoia-matrix/admin-actions.log"
+max_failed_attempts = 5
+login_delay_microseconds = 300000 

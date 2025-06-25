@@ -1,0 +1,25 @@
+# Configuration files
+config.ini
+
+# Log files
+*.log
+logs/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Backup files
+*.bak
+*.backup 
