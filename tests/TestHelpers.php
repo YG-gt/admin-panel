@@ -9,11 +9,14 @@
 // These are copies of the functions to avoid including the full admin.php file
 
 function test_validateUsername($username) {
-    return preg_match('/^[a-zA-Z0-9_\-\.]+$/', $username);
+    return preg_match('/^[a-zA-Z0-9_\-\.]+$/', $username) === 1;
 }
 
 function test_verifyCsrf($token) {
-    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
+    if (!isset($_SESSION['csrf_token']) || $token === null) {
+        return false;
+    }
+    return hash_equals($_SESSION['csrf_token'], (string)$token);
 }
 
 function test_isActionAllowed($action, $targetUserId = null) {
@@ -76,9 +79,10 @@ function test_makeMatrixRequest($url, $method = 'GET', $data = null, $headers = 
         ];
     }
     
+    // Default response for other endpoints
     return [
         'success' => true,
-        'response' => json_encode(['success' => true]),
+        'response' => json_encode(['result' => 'success']),
         'http_code' => 200
     ];
 } 

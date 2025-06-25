@@ -74,8 +74,8 @@ class ApiTest extends TestCase
         $this->assertEquals(200, $result['http_code']);
         
         $response = json_decode($result['response'], true);
-        $this->assertArrayHasKey('success', $response);
-        $this->assertTrue($response['success']);
+        $this->assertArrayHasKey('result', $response);
+        $this->assertEquals('success', $response['result']);
     }
 
     /**
@@ -130,9 +130,9 @@ class ApiTest extends TestCase
         $testUrls = [
             MATRIX_SERVER . '/_matrix/client/r0/login' => 'access_token',
             MATRIX_SERVER . '/_synapse/admin/v1/users/@user:domain.com/admin' => 'admin',
-            MATRIX_SERVER . '/_synapse/admin/v2/users' => 'success',
-            MATRIX_SERVER . '/_synapse/admin/v1/users/@user:domain.com/password' => 'success',
-            MATRIX_SERVER . '/some/other/endpoint' => 'success'
+            MATRIX_SERVER . '/_synapse/admin/v2/users' => 'result',
+            MATRIX_SERVER . '/_synapse/admin/v1/users/@user:domain.com/password' => 'result',
+            MATRIX_SERVER . '/some/other/endpoint' => 'result'
         ];
         
         foreach ($testUrls as $url => $expectedKey) {

@@ -4,9 +4,7 @@
          testdox="true"
          failOnRisky="true"
          failOnWarning="true"
-         convertErrorsToExceptions="true"
-         convertNoticesToExceptions="true"
-         convertWarningsToExceptions="true"
+
          processIsolation="false"
          stopOnFailure="false">
     
