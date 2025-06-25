@@ -1,4 +1,4 @@
-# 🔒 Paranoia Matrix Admin Panel v1.0
+# 🔒 Paranoia — Secure Matrix Admin Panel
 
 ```
   ____                            _       
