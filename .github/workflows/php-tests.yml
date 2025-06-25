@@ -24,7 +24,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php-version }}
-          extensions: curl, mbstring, session
+          extensions: curl, mbstring, session, dom, xml, tokenizer, ctype, json
           coverage: xdebug
           tools: composer:v2
 
@@ -39,10 +39,14 @@ jobs:
           restore-keys: php-${{ matrix.php-version }}-composer-
 
       - name: 🔧 Install dependencies
-        run: composer install --prefer-dist --no-progress --no-suggest --no-interaction
+        run: composer install --prefer-dist --no-progress --no-interaction
 
       - name: 🧪 Run PHPUnit tests
-        run: composer test
+        run: |
+          # Check if vendor directory exists
+          ls -la vendor/bin/
+          # Run tests
+          ./vendor/bin/phpunit --colors=always --testdox
 
       - name: 📊 Run tests with coverage
         if: matrix.php-version == '8.2'
