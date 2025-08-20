@@ -1,6 +1,6 @@
 [matrix]
-server = "https://matrix.example.com"
-domain = "example.com"
+server = "https://trustsend.pro"
+domain = "trustsend.pro"
 
 [security]
 log_file = "/var/log/paranoia-matrix/admin-actions.log"

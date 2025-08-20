@@ -517,6 +517,77 @@ if (($_POST['action'] ?? '') === 'change_password' && $isLoggedIn) {
     }
 }
 
+// Handle room creation
+if (($_POST['action'] ?? '') === 'create_room' && $isLoggedIn) {
+    $roomName = trim($_POST['room_name'] ?? '');
+    $roomType = $_POST['room_type'] ?? 'private';
+    $csrfToken = $_POST['csrf_token'] ?? '';
+    if (!verifyCsrf($csrfToken)) {
+        $error = 'Invalid CSRF token';
+    } elseif (!$roomName) {
+        $error = 'Please enter room name';
+    } else {
+        $roomData = [
+            'name' => $roomName,
+            'preset' => $roomType === 'public' ? 'public_chat' : 'private_chat',
+            'visibility' => $roomType,
+        ];
+        $roomResult = makeMatrixRequest(
+            MATRIX_SERVER . '/_matrix/client/r0/createRoom',
+            'POST',
+            json_encode($roomData),
+            [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $_SESSION['admin_token']
+            ]
+        );
+        if (!$roomResult['success']) {
+            $error = 'Network error during room creation';
+            logAction('failed to create room "' . $roomName . '" - network error');
+        } elseif ($roomResult['http_code'] === 200) {
+            $roomResp = json_decode($roomResult['response'], true);
+            $success = 'Room created successfully. Room ID: ' . htmlspecialchars($roomResp['room_id'] ?? 'unknown');
+            logAction('create room "' . $roomName . '" (' . ($roomResp['room_id'] ?? 'unknown') . ')');
+        } else {
+            $error = 'Failed to create room: ' . $roomResult['response'];
+            logAction('failed to create room "' . $roomName . '" - ' . $roomResult['response']);
+        }
+    }
+}
+
+// Handle inviting user to room
+if (($_POST['action'] ?? '') === 'invite_to_room' && $isLoggedIn) {
+    $inviteRoomId = trim($_POST['invite_room_id'] ?? '');
+    $inviteUserId = trim($_POST['invite_user_id'] ?? '');
+    $csrfToken = $_POST['csrf_token'] ?? '';
+    if (!verifyCsrf($csrfToken)) {
+        $error = 'Invalid CSRF token';
+    } elseif (!$inviteRoomId || !$inviteUserId) {
+        $error = 'Please enter both Room ID and User ID';
+    } else {
+        $inviteData = [ 'user_id' => $inviteUserId ];
+        $inviteResult = makeMatrixRequest(
+            MATRIX_SERVER . '/_matrix/client/r0/rooms/' . urlencode($inviteRoomId) . '/invite',
+            'POST',
+            json_encode($inviteData),
+            [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $_SESSION['admin_token']
+            ]
+        );
+        if (!$inviteResult['success']) {
+            $error = 'Network error during invite';
+            logAction('failed to invite ' . $inviteUserId . ' to room ' . $inviteRoomId . ' - network error');
+        } elseif ($inviteResult['http_code'] === 200) {
+            $success = 'User ' . htmlspecialchars($inviteUserId) . ' invited to room ' . htmlspecialchars($inviteRoomId);
+            logAction('invite ' . $inviteUserId . ' to room ' . $inviteRoomId);
+        } else {
+            $error = 'Failed to invite user: ' . $inviteResult['response'];
+            logAction('failed to invite ' . $inviteUserId . ' to room ' . $inviteRoomId . ' - ' . $inviteResult['response']);
+        }
+    }
+}
+
 // Get users list if logged in
 $users = [];
 $totalUsers = 0;
@@ -566,96 +637,85 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
     <title>Matrix Admin Panel - <?= MATRIX_DOMAIN ?></title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%);
-            color: #00ff00;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Menlo', monospace;
+            background: #181A20;
+            color: #C9D1D9;
             min-height: 100vh;
         }
-        
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        
         .header {
             position: relative;
             text-align: center;
             margin-bottom: 30px;
             padding: 20px;
-            background: rgba(0, 255, 0, 0.1);
+            background: #23272E;
             border-radius: 10px;
-            border: 1px solid #00ff00;
+            border: 1px solid #30363D;
         }
-        
         .nav-links {
             position: absolute;
             top: 20px;
             left: 20px;
         }
-        
         .nav-links a,
         .nav-links .btn {
-            color: #00ff00;
+            color: #58A6FF;
             text-decoration: none;
             padding: 8px 16px;
-            border: 1px solid #00ff00;
+            border: 1px solid #30363D;
             border-radius: 5px;
             margin-right: 10px;
             transition: all 0.3s ease;
-            background: rgba(0, 0, 0, 0.8);
+            background: #23272E;
             display: inline-block;
             font-size: 14px;
             font-weight: normal;
         }
-        
         .nav-links a:hover,
         .nav-links .btn:hover {
-            background: rgba(0, 255, 0, 0.2);
-            transform: translateY(-1px);
+            background: #21262C;
+            color: #79C0FF;
         }
-        
         .header h1 {
             font-size: 2.5rem;
-            text-shadow: 0 0 10px #00ff00;
+            color: #58A6FF;
+            text-shadow: 0 0 10px #30363D;
             margin-bottom: 10px;
         }
-        
         .card {
-            background: rgba(0, 0, 0, 0.8);
-            border: 1px solid #00ff00;
+            background: #23272E;
+            border: 1px solid #30363D;
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 20px;
-            box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
+            box-shadow: 0 0 20px rgba(40, 50, 60, 0.2);
         }
-        
         .form-group { margin-bottom: 15px; }
-        
         .form-group label {
             display: block;
             margin-bottom: 5px;
-            color: #00cc00;
+            color: #8B949E;
         }
-        
         .form-group input[type="text"],
         .form-group input[type="password"] {
             width: 100%;
             padding: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            border: 1px solid #00ff00;
+            background: #181A20;
+            border: 1px solid #30363D;
             border-radius: 5px;
-            color: #00ff00;
+            color: #C9D1D9;
             font-size: 14px;
+            margin: 10px 0;
         }
-        
         .checkbox-group {
             display: flex;
             align-items: center;
             gap: 10px;
         }
-        
         .btn {
-            background: linear-gradient(45deg, #00ff00, #00cc00);
-            color: #000;
+            background: linear-gradient(90deg, #30363D 0%, #21262C 100%);
+            color: #58A6FF;
             border: none;
             padding: 12px 24px;
             border-radius: 5px;
@@ -663,40 +723,34 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             font-weight: bold;
             transition: all 0.3s ease;
         }
-        
         .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0, 255, 0, 0.3);
+            background: #21262C;
+            color: #79C0FF;
+            box-shadow: 0 5px 15px rgba(88, 166, 255, 0.1);
         }
-        
         .btn-danger {
             background: linear-gradient(45deg, #ff4444, #cc0000);
             color: #fff;
         }
-        
         .btn-warning {
             background: linear-gradient(45deg, #ffaa00, #cc8800);
             color: #000;
         }
-        
         .btn-info {
             background: linear-gradient(45deg, #0088ff, #0066cc);
             color: #fff;
         }
-        
         .action-buttons {
             display: flex;
             gap: 5px;
             flex-wrap: wrap;
             align-items: center;
         }
-        
         .action-buttons .btn {
             min-width: 90px;
             text-align: center;
             white-space: nowrap;
         }
-        
         .action-buttons button,
         .action-buttons span {
             padding: 6px 12px;
@@ -705,31 +759,27 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             text-align: center;
             display: inline-block;
         }
-        
         .search-form {
             display: flex;
             gap: 10px;
             margin-bottom: 20px;
             align-items: center;
         }
-        
         .search-form input[type="text"] {
             flex: 1;
             padding: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            border: 1px solid #00ff00;
+            background: #181A20;
+            border: 1px solid #30363D;
             border-radius: 5px;
-            color: #00ff00;
+            color: #C9D1D9;
         }
-        
         .search-form select {
             padding: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            border: 1px solid #00ff00;
+            background: #181A20;
+            border: 1px solid #30363D;
             border-radius: 5px;
-            color: #00ff00;
+            color: #C9D1D9;
         }
-        
         .pagination {
             display: flex;
             justify-content: center;
@@ -737,75 +787,63 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             gap: 10px;
             margin: 20px 0;
         }
-        
         .pagination a, .pagination span {
             padding: 8px 12px;
-            border: 1px solid #00ff00;
+            border: 1px solid #30363D;
             border-radius: 5px;
             text-decoration: none;
-            color: #00ff00;
+            color: #58A6FF;
         }
-        
         .pagination a:hover {
-            background: rgba(0, 255, 0, 0.2);
+            background: #21262C;
+            color: #79C0FF;
         }
-        
         .pagination .current {
-            background: rgba(0, 255, 0, 0.3);
+            background: #23272E;
             font-weight: bold;
         }
-        
         .stats {
             text-align: center;
             margin: 10px 0;
             opacity: 0.7;
             font-size: 14px;
         }
-        
         .alert {
             padding: 15px;
             border-radius: 5px;
             margin-bottom: 20px;
         }
-        
         .alert-success {
-            background: rgba(0, 255, 0, 0.2);
-            border: 1px solid #00ff00;
-            color: #00ff00;
+            background: #23272E;
+            border: 1px solid #30363D;
+            color: #58A6FF;
         }
-        
         .alert-error {
-            background: rgba(255, 0, 0, 0.2);
+            background: #23272E;
             border: 1px solid #ff4444;
             color: #ff4444;
         }
-        
         .users-table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
         }
-        
         .users-table th,
         .users-table td {
             padding: 12px;
             text-align: left;
-            border-bottom: 1px solid #00ff00;
+            border-bottom: 1px solid #30363D;
         }
-        
         .users-table th {
-            background: rgba(0, 255, 0, 0.2);
-            color: #00ff00;
+            background: #23272E;
+            color: #58A6FF;
             font-weight: bold;
         }
-        
         .users-table tr:hover {
-            background: rgba(0, 255, 0, 0.1);
+            background: #21262C;
         }
-        
-        .status-active { color: #00ff00; }
+        .status-active { color: #58A6FF; }
         .status-inactive { color: #ff4444; }
-        
         .logout-link {
             position: absolute;
             top: 20px;
@@ -817,24 +855,20 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             border-radius: 5px;
             transition: all 0.3s ease;
             font-size: 14px;
-            background: rgba(0, 0, 0, 0.8);
+            background: #23272E;
         }
-        
         .logout-link:hover {
-            background: rgba(255, 68, 68, 0.2);
-            transform: translateY(-1px);
+            background: #21262C;
+            color: #ff6666;
         }
-        
         @media (max-width: 768px) {
             .header {
                 padding: 15px;
             }
-            
             .header h1 {
                 font-size: 2rem;
                 margin-bottom: 15px;
             }
-            
             .logout-link {
                 position: static;
                 display: inline-block;
@@ -842,21 +876,17 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
                 font-size: 12px;
                 padding: 8px 16px;
             }
-            
             .container {
                 padding: 10px;
             }
-            
             .users-table {
                 font-size: 12px;
             }
-            
             .users-table th,
             .users-table td {
                 padding: 8px;
             }
         }
-        
         /* Modal styles */
         .modal {
             display: none;
@@ -866,20 +896,18 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
+            background-color: rgba(24, 26, 32, 0.95);
         }
-        
         .modal-content {
-            background: rgba(0, 0, 0, 0.9);
+            background: #23272E;
             margin: 15% auto;
             padding: 20px;
-            border: 1px solid #00ff00;
+            border: 1px solid #30363D;
             border-radius: 10px;
             width: 80%;
             max-width: 500px;
-            color: #00ff00;
+            color: #C9D1D9;
         }
-        
         .close {
             color: #ff4444;
             float: right;
@@ -887,7 +915,6 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             font-weight: bold;
             cursor: pointer;
         }
-        
         .close:hover {
             color: #ff6666;
         }
@@ -971,6 +998,43 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
                     <button type="submit" class="btn">Create User</button>
                 </form>
             </div>
+
+                <div class="card">
+                    <h2>Create Room</h2>
+                    <form method="POST">
+                        <input type="hidden" name="action" value="create_room">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                        <div class="form-group">
+                            <label for="room_name">Room Name:</label>
+                            <input type="text" id="room_name" name="room_name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="room_type">Room Type:</label>
+                            <select id="room_type" name="room_type">
+                                <option value="private">Private</option>
+                                <option value="public">Public</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn">Create Room</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h2>Invite User to Room</h2>
+                    <form method="POST">
+                        <input type="hidden" name="action" value="invite_to_room">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                        <div class="form-group">
+                            <label for="invite_room_id">Room ID:</label>
+                            <input type="text" id="invite_room_id" name="invite_room_id" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="invite_user_id">User ID (@user:domain):</label>
+                            <input type="text" id="invite_user_id" name="invite_user_id" required>
+                        </div>
+                        <button type="submit" class="btn">Invite User</button>
+                    </form>
+                </div>
 
             <div class="card">
                 <h2>Search Users</h2>

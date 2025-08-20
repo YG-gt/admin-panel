@@ -19,20 +19,3 @@ python3-certbot-nginx
 # systemctl start nginx
 # systemctl start php8.1-fpm
 
-## Directory Structure:
-# /var/www/your-domain.com/ - web root (symlinks to project files)
-# /var/log/paranoia-matrix/ - log directory (needs write permissions)
-
-## Nginx Configuration:
-# Create site config in /etc/nginx/sites-available/
-# Enable with: ln -sf /etc/nginx/sites-available/your-site /etc/nginx/sites-enabled/
-# Test with: nginx -t
-# Reload with: systemctl reload nginx
-
-## SSL Certificate:
-# certbot --nginx -d your-domain.com --non-interactive --agree-tos --email your-email@domain.com
-
-## File Permissions:
-# chown -R www-data:www-data /var/www/your-domain.com/
-# chmod 755 /var/log/paranoia-matrix/
-# chown www-data:www-data /var/log/paranoia-matrix/ 

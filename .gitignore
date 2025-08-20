@@ -1,4 +1,4 @@
-# Configuration files
+# Configuration file
 config.ini
 
 # Log files
@@ -22,4 +22,4 @@ Thumbs.db
 
 # Backup files
 *.bak
-*.backup 
+*.backup

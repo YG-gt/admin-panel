@@ -169,46 +169,42 @@ if ($isLoggedIn) {
     <title>Matrix Admin Panel - <?= MATRIX_DOMAIN ?></title>
     <style>
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%);
-            color: #00ff00;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Menlo', monospace;
+            background: #181A20;
+            color: #C9D1D9;
             min-height: 100vh;
             margin: 0;
             padding: 20px;
         }
-        
         .container {
             max-width: 1200px;
             margin: 0 auto;
         }
-        
         .header {
             text-align: center;
             margin-bottom: 30px;
             padding: 20px;
-            background: rgba(0, 255, 0, 0.1);
+            background: #23272E;
             border-radius: 10px;
-            border: 1px solid #00ff00;
+            border: 1px solid #30363D;
         }
-        
         .header h1 {
             font-size: 2.5rem;
-            text-shadow: 0 0 10px #00ff00;
+            color: #58A6FF;
+            text-shadow: 0 0 10px #30363D;
             margin-bottom: 10px;
         }
-        
         .card {
-            background: rgba(0, 0, 0, 0.8);
-            border: 1px solid #00ff00;
+            background: #23272E;
+            border: 1px solid #30363D;
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 20px;
-            box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
+            box-shadow: 0 0 20px rgba(40, 50, 60, 0.2);
         }
-        
         .btn {
-            background: linear-gradient(45deg, #00ff00, #00cc00);
-            color: #000;
+            background: linear-gradient(90deg, #30363D 0%, #21262C 100%);
+            color: #58A6FF;
             border: none;
             padding: 12px 24px;
             border-radius: 5px;
@@ -216,26 +212,34 @@ if ($isLoggedIn) {
             font-weight: bold;
             transition: all 0.3s ease;
         }
-        
         .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0, 255, 0, 0.3);
+            background: #21262C;
+            color: #79C0FF;
+            box-shadow: 0 5px 15px rgba(88, 166, 255, 0.1);
         }
-        
         input[type="text"], input[type="password"] {
             width: 100%;
             padding: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            border: 1px solid #00ff00;
+            background: #181A20;
+            border: 1px solid #30363D;
             border-radius: 5px;
-            color: #00ff00;
+            color: #C9D1D9;
             margin: 10px 0;
         }
-        
         label {
-            color: #00cc00;
+            color: #8B949E;
             display: block;
             margin-top: 10px;
+        }
+        ul {
+            color: #8B949E;
+        }
+        a {
+            color: #58A6FF;
+            text-decoration: underline;
+        }
+        a:hover {
+            color: #79C0FF;
         }
     </style>
 </head>
@@ -261,7 +265,6 @@ if ($isLoggedIn) {
         </div>
         
         <div style="text-align: center; margin-top: 30px; opacity: 0.7;">
-            <p>Created with ❤️ by <a href="https://www.easypro.tech" style="color: #00aa00;">www.easypro.tech</a></p>
         </div>
     </div>
 </body>

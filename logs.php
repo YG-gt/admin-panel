@@ -310,7 +310,6 @@ $totalPages = ($totalLogs > 0 && $perPage > 0) ? ceil($totalLogs / $perPage) : 1
         </div>
         
         <div style="text-align: center; margin-top: 30px; opacity: 0.7;">
-            <p>Created with ❤️ by <a href="https://www.easypro.tech" style="color: #00aa00;">www.easypro.tech</a></p>
         </div>
     </div>
 </body>
