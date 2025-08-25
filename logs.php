@@ -33,170 +33,159 @@ $totalLogs = 0;
 if (file_exists(LOG_FILE)) {
     $logContent = file_get_contents(LOG_FILE);
     if ($logContent !== false) {
-        $allLogs = array_reverse(explode("\n", trim($logContent)));
-        
-        // Remove empty lines
-        $allLogs = array_filter($allLogs, function($log) {
-            return trim($log) !== '';
-        });
-        
-        // Reset array keys after filtering
-        $allLogs = array_values($allLogs);
-        
-        // Filter logs by search term
-        if ($search) {
-            $allLogs = array_filter($allLogs, function($log) use ($search) {
-                return stripos($log, $search) !== false;
-            });
-            // Reset keys again after search filtering
-            $allLogs = array_values($allLogs);
-        }
-        
-        $totalLogs = count($allLogs);
-        $offset = ($page - 1) * $perPage;
-        $logs = array_slice($allLogs, $offset, $perPage);
-    }
-}
-
-$totalPages = ($totalLogs > 0 && $perPage > 0) ? ceil($totalLogs / $perPage) : 1;
-?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Action Logs - <?= MATRIX_DOMAIN ?></title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%);
-            color: #00ff00;
-            min-height: 100vh;
-        }
-        
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        
-        .header {
-            position: relative;
-            text-align: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: rgba(0, 255, 0, 0.1);
-            border-radius: 10px;
-            border: 1px solid #00ff00;
-        }
-        
-        .header h1 {
-            font-size: 2.5rem;
-            text-shadow: 0 0 10px #00ff00;
-            margin-bottom: 10px;
-        }
-        
-        .nav-links {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-        }
-        
-        .nav-links a {
-            color: #00ff00;
-            text-decoration: none;
-            padding: 8px 16px;
-            border: 1px solid #00ff00;
-            border-radius: 5px;
-            margin-right: 10px;
-            transition: all 0.3s ease;
-        }
-        
-        .nav-links a:hover {
-            background: rgba(0, 255, 0, 0.2);
-        }
-        
-        .logout-link {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            color: #ff4444;
-            text-decoration: none;
-            padding: 10px 20px;
-            border: 1px solid #ff4444;
-            border-radius: 5px;
-            font-size: 14px;
-        }
-        
-        .logout-link:hover {
-            background: rgba(255, 68, 68, 0.2);
-        }
-        
-        .card {
-            background: rgba(0, 0, 0, 0.8);
-            border: 1px solid #00ff00;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
-        }
-        
-        .search-form {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            align-items: center;
-        }
-        
-        .search-form input[type="text"] {
-            flex: 1;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            border: 1px solid #00ff00;
-            border-radius: 5px;
-            color: #00ff00;
-        }
-        
-        .search-form select {
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            border: 1px solid #00ff00;
-            border-radius: 5px;
-            color: #00ff00;
-        }
-        
-        .btn {
-            background: linear-gradient(45deg, #00ff00, #00cc00);
-            color: #000;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            text-decoration: none;
-            display: inline-block;
-        }
-        
-        .log-container {
-            background: rgba(0, 0, 0, 0.5);
-            border: 1px solid #00ff00;
-            border-radius: 5px;
-            padding: 15px;
-            max-height: 600px;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 12px;
-            white-space: pre-line;
-            margin-bottom: 20px;
-        }
-        
-        .log-entry {
-            padding: 5px 0;
-            border-bottom: 1px solid rgba(0, 255, 0, 0.1);
-        }
-        
-        .log-entry:last-child {
-            border-bottom: none;
-        }
-        
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Menlo', monospace;
+                background: #181A20;
+                color: #C9D1D9;
+                min-height: 100vh;
+            }
+            .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+            .header {
+                position: relative;
+                text-align: center;
+                margin-bottom: 30px;
+                padding: 20px;
+                background: #23272E;
+                border-radius: 10px;
+                border: 1px solid #30363D;
+            }
+            .header h1 {
+                font-size: 2.5rem;
+                color: #58A6FF;
+                text-shadow: 0 0 10px #30363D;
+                margin-bottom: 10px;
+            }
+            .nav-links {
+                position: absolute;
+                top: 20px;
+                left: 20px;
+            }
+            .nav-links a {
+                color: #58A6FF;
+                text-decoration: none;
+                padding: 8px 16px;
+                border: 1px solid #30363D;
+                border-radius: 5px;
+                margin-right: 10px;
+                transition: all 0.3s ease;
+                background: #23272E;
+            }
+            .nav-links a:hover {
+                background: #21262C;
+                color: #79C0FF;
+            }
+            .logout-link {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                color: #ff4444;
+                text-decoration: none;
+                padding: 10px 20px;
+                border: 1px solid #ff4444;
+                border-radius: 5px;
+                font-size: 14px;
+                background: #23272E;
+            }
+            .logout-link:hover {
+                background: #21262C;
+                color: #ff6666;
+            }
+            .card {
+                background: #23272E;
+                border: 1px solid #30363D;
+                border-radius: 10px;
+                padding: 20px;
+                margin-bottom: 20px;
+                box-shadow: 0 0 20px rgba(40, 50, 60, 0.2);
+            }
+            .search-form {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 20px;
+                align-items: center;
+            }
+            .search-form input[type="text"] {
+                flex: 1;
+                padding: 10px;
+                background: #181A20;
+                border: 1px solid #30363D;
+                border-radius: 5px;
+                color: #C9D1D9;
+            }
+            .search-form select {
+                padding: 10px;
+                background: #181A20;
+                border: 1px solid #30363D;
+                border-radius: 5px;
+                color: #C9D1D9;
+            }
+            .btn {
+                background: linear-gradient(90deg, #30363D 0%, #21262C 100%);
+                color: #58A6FF;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-weight: bold;
+                text-decoration: none;
+                display: inline-block;
+                transition: all 0.3s ease;
+            }
+            .btn:hover {
+                background: #21262C;
+                color: #79C0FF;
+                box-shadow: 0 5px 15px rgba(88, 166, 255, 0.1);
+            }
+            .log-container {
+                background: #181A20;
+                border: 1px solid #30363D;
+                border-radius: 5px;
+                padding: 15px;
+                max-height: 600px;
+                overflow-y: auto;
+                font-family: monospace;
+                font-size: 12px;
+                white-space: pre-line;
+                margin-bottom: 20px;
+                color: #00ff00; /* keep log text green */
+            }
+            .log-entry {
+                padding: 5px 0;
+                border-bottom: 1px solid rgba(0, 255, 0, 0.2); /* subtle green divider to match log color */
+            }
+            .log-entry:last-child { border-bottom: none; }
+            .pagination {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 10px;
+                margin: 20px 0;
+            }
+            .pagination a, .pagination span {
+                padding: 8px 12px;
+                border: 1px solid #30363D;
+                border-radius: 5px;
+                text-decoration: none;
+                color: #58A6FF;
+            }
+            .pagination a:hover {
+                background: #21262C;
+                color: #79C0FF;
+            }
+            .pagination .current {
+                background: #23272E;
+                font-weight: bold;
+            }
+            .stats {
+                text-align: center;
+                margin: 10px 0;
+                opacity: 0.8;
+                font-size: 14px;
+                color: #8B949E;
+            }
+        </style>
         .pagination {
             display: flex;
             justify-content: center;
