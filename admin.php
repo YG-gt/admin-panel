@@ -643,7 +643,7 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             color: #C9D1D9;
             min-height: 100vh;
         }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; padding: 50px; }
         .header {
             position: relative;
             text-align: center;
@@ -740,6 +740,11 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             background: linear-gradient(45deg, #0088ff, #0066cc);
             color: #fff;
         }
+        .login-form-actions {
+            display: flex;
+            justify-content: center;
+            margin-top: 15px;
+        }
         .action-buttons {
             display: flex;
             gap: 5px;
@@ -809,9 +814,11 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             font-size: 14px;
         }
         .alert {
-            padding: 15px;
+            font-size: 12px; 
+            padding: 5px;
             border-radius: 5px;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
+            margin-top: 10px;
         }
         .alert-success {
             background: #23272E;
@@ -820,7 +827,6 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
         }
         .alert-error {
             background: #23272E;
-            border: 1px solid #ff4444;
             color: #ff4444;
         }
         .users-table {
@@ -972,7 +978,9 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
                         <label for="password">Password:</label>
                         <input type="password" id="password" name="password" required>
                     </div>
-                    <button type="submit" class="btn">Login</button>
+                    <div class="login-form-actions">
+                        <button type="submit" class="btn">Login</button>
+                    </div>
                 </form>
             </div>
         <?php else: ?>
@@ -1200,10 +1208,6 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
                 <?php endif; ?>
             </div>
         <?php endif; ?>
-        
-        <div style="text-align: center; margin-top: 30px; opacity: 0.7;">
-            <p>Created with ❤️ by <a href="https://www.easypro.tech" style="color: #00aa00;">www.easypro.tech</a></p>
-        </div>
     </div>
 
     <!-- Password Change Modal -->
