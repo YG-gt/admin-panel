@@ -1,7 +1,10 @@
 <?php
-// rooms.php — список комнат + массовое удаление + создание комнаты + инвайт пользователя
+// rooms.php — диагностическая версия: список комнат + создание + инвайт + массовое удаление
+// Включаем явный вывод ошибок ТОЛЬКО здесь (удали после починки)
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
 
-// Мягкая защита: если вдруг файл откроют напрямую
+// Мягкая защита: если запущено напрямую
 if (!function_exists('isLoggedIn')) {
   require __DIR__ . '/bootstrap.php';
 }
@@ -12,6 +15,30 @@ if (!isLoggedIn()) {
 
 $error   = $_GET['error']   ?? null;
 $success = $_GET['success'] ?? null;
+
+/* ===================== Helpers ===================== */
+
+function safe_json_decode($s) {
+    if (!is_string($s) || $s === '') return [];
+    $d = json_decode($s, true);
+    return is_array($d) ? $d : [];
+}
+function show_http_debug($label, $res) {
+    echo '<div class="card alert alert-error" style="white-space:pre-wrap;">';
+    echo htmlspecialchars($label)."\n";
+    echo 'success: '.(($res['success']??false) ? 'true' : 'false')."\n";
+    echo 'http_code: '.(int)($res['http_code']??0)."\n";
+    if (!empty($res['error'])) {
+        echo 'error: '.htmlspecialchars($res['error'])."\n";
+    }
+    $body = (string)($res['response'] ?? '');
+    if ($body !== '') {
+        $short = mb_substr($body, 0, 2000);
+        echo "response (truncated):\n".htmlspecialchars($short);
+        if (mb_strlen($body) > 2000) echo "\n…(truncated)…";
+    }
+    echo '</div>';
+}
 
 /* ===================== Actions ===================== */
 
@@ -25,7 +52,6 @@ if (($_POST['action'] ?? '') === 'create_room') {
         if ($roomName === '') {
             $error = 'Please enter room name';
         } else {
-            // Synapse client API (можно r0/v3 — оставим r0, как у тебя в монолите)
             $payload = json_encode([
                 'name'       => $roomName,
                 'preset'     => $roomType === 'public' ? 'public_chat' : 'private_chat',
@@ -40,23 +66,25 @@ if (($_POST['action'] ?? '') === 'create_room') {
                     'Authorization: Bearer '.$_SESSION['admin_token']
                 ]
             );
-            if (!$res['success']) {
+            if (!($res['success'] ?? false)) {
                 $error = 'Network error during room creation';
                 logAction('failed to create room "'.$roomName.'" - network error');
-            } elseif ($res['http_code'] === 200) {
-                $d = json_decode($res['response'] ?? '', true) ?: [];
+            } elseif ((int)$res['http_code'] === 200) {
+                $d = safe_json_decode($res['response'] ?? '');
                 $rid = $d['room_id'] ?? '(unknown)';
                 $success = 'Room created successfully. Room ID: '.htmlspecialchars($rid);
                 logAction('create room "'.$roomName.'" ('.$rid.')');
             } else {
-                $error = 'Failed to create room: '.($res['response'] ?? 'unknown');
-                logAction('failed to create room "'.$roomName.'" - '.($res['response'] ?? 'unknown'));
+                $error = 'Failed to create room';
+                logAction('failed to create room "'.$roomName.'" - http '.(int)$res['http_code']);
+                // Покажем диагностический блок
+                show_http_debug('createRoom failed', $res);
             }
         }
     }
 }
 
-// 2) Приглашение пользователя в комнату
+// 2) Инвайт пользователя
 if (($_POST['action'] ?? '') === 'invite_to_room') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
@@ -76,21 +104,22 @@ if (($_POST['action'] ?? '') === 'invite_to_room') {
                     'Authorization: Bearer '.$_SESSION['admin_token']
                 ]
             );
-            if (!$res['success']) {
+            if (!($res['success'] ?? false)) {
                 $error = 'Network error during invite';
                 logAction('failed to invite '.$inviteUserId.' to room '.$inviteRoomId.' - network error');
-            } elseif ($res['http_code'] === 200) {
+            } elseif ((int)$res['http_code'] === 200) {
                 $success = 'User '.htmlspecialchars($inviteUserId).' invited to room '.htmlspecialchars($inviteRoomId);
                 logAction('invite '.$inviteUserId.' to room '.$inviteRoomId);
             } else {
-                $error = 'Failed to invite user: '.($res['response'] ?? 'unknown');
-                logAction('failed to invite '.$inviteUserId.' to room '.$inviteRoomId.' - '.($res['response'] ?? 'unknown'));
+                $error = 'Failed to invite user';
+                logAction('failed to invite '.$inviteUserId.' to room '.$inviteRoomId.' - http '.(int)$res['http_code']);
+                show_http_debug('invite failed', $res);
             }
         }
     }
 }
 
-// 3) Массовое удаление комнат (админ v2, асинхронно)
+// 3) Массовое удаление (асинхронно)
 if (($_POST['action'] ?? '') === 'bulk_rooms') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error='Invalid CSRF token';
@@ -107,7 +136,7 @@ if (($_POST['action'] ?? '') === 'bulk_rooms') {
                     null,
                     ['Authorization: Bearer '.$_SESSION['admin_token'], 'Content-Type: application/json']
                 );
-                if ($resp['success'] && $resp['http_code']>=200 && $resp['http_code']<300) {
+                if (($resp['success'] ?? false) && (int)$resp['http_code']>=200 && (int)$resp['http_code']<300) {
                     $ok++; logAction('delete room req '.$rid);
                 } else {
                     $fail++; logAction('delete room FAILED '.$rid.' '.($resp['response']??$resp['error']??''));
@@ -122,25 +151,29 @@ if (($_POST['action'] ?? '') === 'bulk_rooms') {
 /* ===================== Filters & Pagination ===================== */
 
 $r_page   = max(1,(int)($_GET['r_page']??1));
-$r_per    = in_array((int)($_GET['r_per_page']??50),[10,50,100], true) ? (int)($_GET['r_per_page']) : 50;
+$r_per_in = (int)($_GET['r_per_page'] ?? 50);
+$r_per    = in_array($r_per_in, [10,50,100], true) ? $r_per_in : 50;
 $r_search = trim($_GET['r_search'] ?? '');
 $from     = ($r_page-1)*$r_per;
 
-/* ===================== Fetch Rooms (admin v1) ===================== */
+/* ===================== Fetch Rooms ===================== */
 
 $url = MATRIX_SERVER.'/_synapse/admin/v1/rooms?limit='.$r_per.'&from='.$from;
 if ($r_search!=='') $url .= '&search_term='.urlencode($r_search);
 
 $res = makeMatrixRequest($url,'GET',null,['Authorization: Bearer '.$_SESSION['admin_token']]);
+
 $rooms = []; $total = 0;
-if ($res['success'] && $res['http_code']===200) {
-    $d = json_decode($res['response'] ?? '', true) ?: [];
+if (($res['success'] ?? false) && (int)$res['http_code']===200) {
+    $d = safe_json_decode($res['response'] ?? '');
     $rooms = $d['rooms'] ?? [];
     $total = (int)($d['total_rooms'] ?? count($rooms));
 } else {
     $error = $error ?: 'Failed to load rooms list';
+    // Включим диагностику, чтобы видеть причину
+    show_http_debug('rooms list failed', $res);
 }
-$pages = max(1,(int)ceil($total/$r_per));
+$pages = max(1,(int)ceil(($total ?: 1)/$r_per));
 ?>
 
 <?php if ($error): ?>
@@ -232,13 +265,13 @@ $pages = max(1,(int)ceil($total/$r_per));
         <?php if (!$rooms): ?>
           <tr><td colspan="8" style="padding:14px;opacity:.7;text-align:center">No rooms</td></tr>
         <?php else: foreach ($rooms as $r):
-          $rid = $r['room_id'] ?? '';
-          $name = $r['name'] ?? '(no name)';
-          $rtype = $r['room_type'] ?? 'room';
-          $vis = ($r['public']??false) ? 'public' : ($r['join_rules'] ?? 'invite');
+          $rid = (string)($r['room_id'] ?? '');
+          $name = (string)($r['name'] ?? '(no name)');
+          $rtype = (string)($r['room_type'] ?? 'room');
+          $vis = ($r['public']??false) ? 'public' : (string)($r['join_rules'] ?? 'invite');
           $mem = (int)($r['joined_members'] ?? 0);
           $enc = !empty($r['encryption']) ? 'yes' : 'no';
-          $creator = $r['creator'] ?? '—';
+          $creator = (string)($r['creator'] ?? '—');
         ?>
         <tr style="border-bottom:1px solid #30363D">
           <td style="padding:10px;text-align:center">
