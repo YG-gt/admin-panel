@@ -12,6 +12,7 @@ if (!in_array($view, $allowed, true)) $view = 'users';
 <meta charset="UTF-8">
 <title>Matrix Admin Panel - <?= htmlspecialchars(MATRIX_DOMAIN) ?></title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="style.css">
 <style>
   *{box-sizing:border-box}
   body{margin:0; font-family:'JetBrains Mono','Fira Code',monospace; background:#181A20; color:#C9D1D9}
