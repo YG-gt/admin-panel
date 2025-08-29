@@ -1,1 +1,71 @@
-<?php require __DIR__ . '/bootstrap.php'; // Определяем запрошенную страницу $view = $_GET['page'] ?? (isLoggedIn() ? 'users' : 'login'); $allowed = ['login','users','rooms','logs']; if (!in_array($view, $allowed, true)) { $view = isLoggedIn() ? 'users' : 'login'; } // Выход if (isset($_GET['logout'])) { session_destroy(); header('Location: index.php?page=login'); exit; } ?> <!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8"> <title>Matrix Admin — <?= htmlspecialchars(MATRIX_DOMAIN) ?></title> <meta name="viewport" content="width=device-width, initial-scale=1.0"> <link rel="stylesheet" href="style.css"> </head> <body> <div class="layout"> <aside class="sidebar"> <div class="brand">Matrix Admin</div> <div class="menu"> <?php if (!isLoggedIn()): ?> <a href="index.php?page=login" class="<?= $view==='login'?'active':'' ?>">🔐 Login</a> <?php else: ?> <a href="index.php?page=users" class="<?= $view==='users'?'active':'' ?>">👤 Users</a> <a href="index.php?page=rooms" class="<?= $view==='rooms'?'active':'' ?>"># Rooms</a> <a href="index.php?page=logs" class="<?= $view==='logs' ?'active':'' ?>">🗒️ Logs</a> <?php endif; ?> </div> <?php if (isLoggedIn()): ?> <div class="sidebar-bottom"> <div class="me"><?= htmlspecialchars(currentUser()) ?></div> <a class="logout" href="index.php?logout=1">Logout</a> </div> <?php endif; ?> </aside> <main class="content"> <?php if (!isLoggedIn() && $view !== 'login') { $view = 'login'; } $file = __DIR__ . "/{$view}.php"; if (is_file($file)) { include $file; } else { echo '<div class="card"><p>View not found.</p></div>'; } ?> </main> </div> </body> </html>
+<?php
+require __DIR__ . '/bootstrap.php';
+
+// Какую страницу рендерить
+$view = $_GET['page'] ?? (isLoggedIn() ? 'users' : 'login');
+$allowed = ['login','users','rooms','logs'];
+if (!in_array($view, $allowed, true)) {
+    $view = isLoggedIn() ? 'users' : 'login';
+}
+
+// Выход
+if (isset($_GET['logout'])) {
+    if (isLoggedIn()) {
+        logAction('logout');
+    }
+    session_destroy();
+    header('Location: index.php?page=login');
+    exit;
+}
+
+// Не пускаем незалогиненных на закрытые страницы
+if (!isLoggedIn() && $view !== 'login') {
+    $view = 'login';
+}
+
+// Подключаем нужный view
+$file = __DIR__ . "/{$view}.php";
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Matrix Admin — <?= htmlspecialchars(MATRIX_DOMAIN) ?></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">Matrix Admin</div>
+
+    <div class="menu">
+      <?php if (!isLoggedIn()): ?>
+        <a href="index.php?page=login" class="<?= $view==='login'?'active':'' ?>">🔐 Login</a>
+      <?php else: ?>
+        <a href="index.php?page=users" class="<?= $view==='users'?'active':'' ?>">👤 Users</a>
+        <a href="index.php?page=rooms" class="<?= $view==='rooms'?'active':'' ?>"># Rooms</a>
+        <a href="index.php?page=logs"  class="<?= $view==='logs' ?'active':'' ?>">🗒️ Logs</a>
+      <?php endif; ?>
+    </div>
+
+    <?php if (isLoggedIn()): ?>
+      <div class="sidebar-bottom">
+        <div class="me"><?= htmlspecialchars(currentUser()) ?></div>
+        <a class="logout" href="index.php?logout=1">Logout</a>
+      </div>
+    <?php endif; ?>
+  </aside>
+
+  <main class="content">
+    <?php
+      if (is_file($file)) {
+        include $file;
+      } else {
+        echo '<div class="card"><p>View not found.</p></div>';
+      }
+    ?>
+  </main>
+</div>
+</body>
+</html>
