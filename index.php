@@ -48,9 +48,7 @@ if (isset($_GET['logout'])) {
 
   <main class="content">
     <?php
-      if (!isLoggedIn() && $view !== 'login') {
-        $view = 'login';
-      }
+      if (!isLoggedIn() && $view !== 'login') { $view = 'login'; }
 
       $file = __DIR__ . "/{$view}.php";
       if (is_file($file)) {
