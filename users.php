@@ -1,159 +1,374 @@
 <?php
-// rooms.php
-require_once __DIR__ . '/bootstrap.php';
+// users.php — Users section (requires login)
+require_login();
 
-$ok = require_login();
-if (!$ok) {
-    echo '<div class="card"><p>Please log in to manage rooms.</p></div>';
-    return;
-}
-echo "<!-- rooms.php reached -->";
-
-$error = $_GET['error']  ?? null;
+$error   = $_GET['error']   ?? null;
 $success = $_GET['success'] ?? null;
 
-/* Bulk delete (async v2) */
-if (($_POST['action'] ?? '') === 'bulk_rooms') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) { $error='Invalid CSRF token'; }
-    else {
-        $ids = array_filter((array)($_POST['room_ids'] ?? []), 'strlen');
-        if (!$ids) $error='No rooms selected';
-        else {
-            $okc=$fail=0;
-            foreach ($ids as $rid) {
-                $resp = makeMatrixRequest(
-                    MATRIX_SERVER.'/_synapse/admin/v2/rooms/'.rawurlencode($rid),
-                    'DELETE', null, ['Authorization: Bearer '.$_SESSION['admin_token'], 'Content-Type: application/json']
-                );
-                if ($resp['success'] && $resp['http_code']>=200 && $resp['http_code']<300) { $okc++; logAction('delete room req '.$rid); }
-                else { $fail++; logAction('delete room FAILED '.$rid.' '.($resp['response']??$resp['error']??'')); }
+// ---------- Helpers to preserve filters on redirect ----------
+function users_redirect_with_state($extra = []) {
+    $params = [
+        'page'        => 'users',
+        'per_page'    => $_GET['per_page']    ?? 50,
+        'search'      => $_GET['search']      ?? '',
+        'show_deactivated' => isset($_GET['show_deactivated']) ? '1' : null,
+    ];
+    foreach ($extra as $k=>$v) { $params[$k] = $v; }
+    // remove nulls
+    $params = array_filter($params, fn($v) => $v !== null);
+    header('Location: index.php?'.http_build_query($params));
+    exit;
+}
+
+// ---------- Actions ----------
+if (($_POST['action'] ?? '') === 'create_user') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid CSRF token';
+    } else {
+        $u = trim($_POST['new_username'] ?? '');
+        $p = $_POST['new_password'] ?? '';
+        $isAdmin = !empty($_POST['is_admin']);
+        if ($u === '' || $p === '') {
+            $error = 'Please enter username and password';
+        } elseif (!validateUsername($u)) {
+            $error = 'Invalid username format';
+        } elseif (strlen($p) < 6) {
+            $error = 'Password must be at least 6 characters';
+        } else {
+            $payload = json_encode(['password'=>$p,'admin'=>$isAdmin]);
+            $res = makeMatrixRequest(
+                MATRIX_SERVER.'/_synapse/admin/v2/users/@'.$u.':'.MATRIX_DOMAIN,
+                'PUT',
+                $payload,
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+            );
+            if ($res['success'] && in_array($res['http_code'],[200,201],true)) {
+                logAction('create user @'.$u.':'.MATRIX_DOMAIN.($isAdmin?' (admin)':''));
+                users_redirect_with_state(['success'=>'User created']);
+            } else {
+                $error = 'Failed to create user: '.($res['response'] ?? $res['error'] ?? 'unknown');
             }
-            if ($fail===0) $success = "Deletion requested for $okc room(s) (async).";
-            else $error = "Requested deletion: OK $okc, failed $fail.";
         }
     }
 }
 
-/* Fetch rooms list (v1) */
-$r_page = max(1,(int)($_GET['r_page']??1));
-$r_per  = (isset($_GET['r_per_page']) && in_array((int)$_GET['r_per_page'],[10,50,100],true))
-    ? (int)$_GET['r_per_page']
-    : 50;
-
-$r_search = trim($_GET['r_search'] ?? '');
-$from = ($r_page-1)*$r_per;
-$url = MATRIX_SERVER.'/_synapse/admin/v1/rooms?limit='.$r_per.'&from='.$from;
-if ($r_search!=='') $url .= '&search_term='.urlencode($r_search);
-
-$res = makeMatrixRequest($url,'GET',null,['Authorization: Bearer '.$_SESSION['admin_token']]);
-$rooms = []; $total = 0;
-
-if ($res['success'] && $res['http_code']===200) {
-    $d = json_decode($res['response'],true) ?: [];
-    $rooms = $d['rooms'] ?? [];
-    $total = (int)($d['total_rooms'] ?? count($rooms));
-} else {
-    $errText = $res['response'] ?? $res['error'] ?? ('HTTP '.$res['http_code']);
-    $error = 'Failed to load rooms: ' . $errText;
-    echo "<!-- rooms_api_fail code={$res['http_code']} -->";
+if (($_POST['action'] ?? '') === 'deactivate_user') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid CSRF token';
+    } else {
+        $uid = $_POST['user_id'] ?? '';
+        if ($uid === ($_SESSION['admin_user'] ?? '')) {
+            $error = 'Cannot deactivate yourself';
+        } elseif ($uid) {
+            $res = makeMatrixRequest(
+                MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
+                'PUT',
+                json_encode(['deactivated'=>true]),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+            );
+            if ($res['success'] && $res['http_code']===200) {
+                logAction('deactivate '.$uid);
+                users_redirect_with_state(['success'=>'User deactivated']);
+            } else {
+                $error = 'Failed to deactivate: '.($res['response'] ?? $res['error'] ?? 'unknown');
+            }
+        }
+    }
 }
 
-$pages = max(1,(int)ceil(($total ?: 1)/$r_per));
+if (($_POST['action'] ?? '') === 'reactivate_user') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid CSRF token';
+    } else {
+        $uid = $_POST['user_id'] ?? '';
+        if ($uid) {
+            $res = makeMatrixRequest(
+                MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
+                'PUT',
+                json_encode(['deactivated'=>false]),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+            );
+            if ($res['success'] && $res['http_code']===200) {
+                logAction('reactivate '.$uid);
+                users_redirect_with_state(['success'=>'User reactivated']);
+            } else {
+                $error = 'Failed to reactivate: '.($res['response'] ?? $res['error'] ?? 'unknown');
+            }
+        }
+    }
+}
+
+if (($_POST['action'] ?? '') === 'toggle_admin') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid CSRF token';
+    } else {
+        $uid = $_POST['user_id'] ?? '';
+        $make = !empty($_POST['make_admin']);
+        if (!$make && $uid === ($_SESSION['admin_user'] ?? '')) {
+            $error = 'Cannot remove your own admin privileges';
+        } elseif ($uid) {
+            $res = makeMatrixRequest(
+                MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
+                'PUT',
+                json_encode(['admin'=>$make]),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+            );
+            if ($res['success'] && $res['http_code']===200) {
+                logAction(($make?'grant':'revoke').' admin '.$uid);
+                users_redirect_with_state(['success'=>$make?'Admin granted':'Admin revoked']);
+            } else {
+                $error = 'Failed to change admin: '.($res['response'] ?? $res['error'] ?? 'unknown');
+            }
+        }
+    }
+}
+
+if (($_POST['action'] ?? '') === 'change_password') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid CSRF token';
+    } else {
+        $uid = $_POST['user_id'] ?? '';
+        $npw = $_POST['new_password'] ?? '';
+        if (strlen($npw) < 6) {
+            $error = 'Password must be at least 6 characters';
+        } elseif ($uid) {
+            $res = makeMatrixRequest(
+                MATRIX_SERVER.'/_synapse/admin/v1/users/'.rawurlencode($uid).'/password',
+                'POST',
+                json_encode(['new_password'=>$npw]),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+            );
+            if ($res['success'] && $res['http_code']===200) {
+                logAction('change password '.$uid);
+                users_redirect_with_state(['success'=>'Password changed']);
+            } else {
+                $error = 'Failed to change password: '.($res['response'] ?? $res['error'] ?? 'unknown');
+            }
+        }
+    }
+}
+
+// ---------- Fetch list ----------
+$page    = max(1, (int)($_GET['page_num'] ?? 1)); // page_num чтобы не конфликтовать с router=page
+$perPage = in_array((int)($_GET['per_page'] ?? 50), [10,50,100], true) ? (int)($_GET['per_page']) : 50;
+$search  = trim($_GET['search'] ?? '');
+$showDeactivated = isset($_GET['show_deactivated']);
+
+$apiUrl = MATRIX_SERVER.'/_synapse/admin/v2/users?limit='.$perPage.'&from='.(($page-1)*$perPage);
+if ($search !== '')        $apiUrl .= '&name='.urlencode($search);
+if ($showDeactivated)      $apiUrl .= '&deactivated=true';
+
+$listRes = makeMatrixRequest($apiUrl,'GET',null,['Authorization: Bearer '.$_SESSION['admin_token']]);
+$users = []; $total = 0;
+if ($listRes['success'] && $listRes['http_code']===200) {
+    $data  = json_decode($listRes['response'], true) ?: [];
+    $users = $data['users'] ?? [];
+    $total = (int)($data['total'] ?? count($users));
+} else {
+    $error = $error ?: 'Failed to load users list';
+}
+$totalPages = max(1, (int)ceil($total / $perPage));
 ?>
 
-<?php if ($error): ?><div class="card alert alert-error"><?= htmlspecialchars($error) ?></div><?php endif; ?>
-<?php if ($success): ?><div class="card alert alert-success"><?= htmlspecialchars($success) ?></div><?php endif; ?>
+<?php if ($error): ?>
+  <div class="card alert alert-error"><?= htmlspecialchars($error) ?></div>
+<?php endif; ?>
+<?php if ($success): ?>
+  <div class="card alert alert-success"><?= htmlspecialchars($success) ?></div>
+<?php endif; ?>
 
 <div class="card">
-  <h2>Rooms</h2>
+  <h2>Create New User</h2>
+  <form method="post" style="margin-top:10px;">
+    <input type="hidden" name="action" value="create_user">
+    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;">
+      <input class="input" name="new_username" placeholder="username (without @domain)" required
+             style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+      <input class="input" type="password" name="new_password" placeholder="password" required
+             style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+      <label style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" name="is_admin"> Admin
+      </label>
+    </div>
+    <div style="margin-top:10px;"><button class="btn">Create</button></div>
+  </form>
+</div>
 
-  <form method="GET" style="display:flex; gap:10px; margin:10px 0;">
-    <input type="hidden" name="page" value="rooms">
-    <input name="r_search" placeholder="Search rooms…" value="<?= htmlspecialchars($r_search) ?>"
+<div class="card">
+  <h2>Users Management</h2>
+
+  <form method="get" style="display:flex;gap:10px;margin:12px 0;align-items:center;">
+    <input type="hidden" name="page" value="users">
+    <input class="input" name="search" placeholder="Search users…" value="<?= htmlspecialchars($search) ?>"
            style="flex:1;padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-    <select name="r_per_page" style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-      <option <?= $r_per==10?'selected':'' ?> value="10">10</option>
-      <option <?= $r_per==50?'selected':'' ?> value="50">50</option>
-      <option <?= $r_per==100?'selected':'' ?> value="100">100</option>
+    <select class="input" name="per_page"
+            style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+      <option value="10"  <?= $perPage===10?'selected':'' ?>>10</option>
+      <option value="50"  <?= $perPage===50?'selected':'' ?>>50</option>
+      <option value="100" <?= $perPage===100?'selected':'' ?>>100</option>
     </select>
+    <label style="display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" name="show_deactivated" <?= $showDeactivated?'checked':'' ?>> show deactivated
+    </label>
     <button class="btn">Search</button>
-    <?php if ($r_search || $r_per!=50): ?>
-      <a class="btn" href="index.php?page=rooms" style="background:#666">Clear</a>
+    <?php if ($search !== '' || $showDeactivated || $perPage !== 50): ?>
+      <a class="btn" href="index.php?page=users" style="background:#666">Clear</a>
     <?php endif; ?>
   </form>
 
-  <div style="opacity:.7;margin:8px 0;">Showing <?= count($rooms) ?> of <?= $total ?> rooms</div>
+  <div class="stats" style="opacity:.7;margin:6px 0;">
+    Showing <?= count($users) ?> of <?= $total ?> users <?= $search!=='' ? '(filtered)' : '' ?>
+  </div>
 
-  <form method="POST" onsubmit="return confirm('Delete selected rooms (async)?');">
-    <input type="hidden" name="action" value="bulk_rooms">
-    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>User ID</th>
+        <th>Display Name</th>
+        <th>Admin</th>
+        <th>Status</th>
+        <th>Created</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+    <?php if (!$users): ?>
+      <tr><td colspan="6" style="text-align:center;opacity:.7;padding:14px;">No users</td></tr>
+    <?php else: foreach ($users as $u):
+        $uid = $u['name'];
+        $isAdm = !empty($u['admin']);
+        $dead = !empty($u['deactivated']);
+        $created = !empty($u['creation_ts']) ? date('Y-m-d H:i', $u['creation_ts']/1000) : '—';
+    ?>
+      <tr>
+        <td><?= htmlspecialchars($uid) ?></td>
+        <td><?= htmlspecialchars($u['displayname'] ?? 'N/A') ?></td>
+        <td><?= $isAdm ? '<span style="color:#00ff88">Admin</span>' : '<span style="color:#888">User</span>' ?></td>
+        <td><?= $dead ? '<span style="color:#ff6666">Inactive</span>' : '<span style="color:#58A6FF">Active</span>' ?></td>
+        <td><?= $created ?></td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <?php if (!$dead): ?>
+              <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
+                <form method="post" style="display:inline;">
+                  <input type="hidden" name="action" value="deactivate_user">
+                  <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+                  <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
+                  <button class="btn" onclick="return confirm('Deactivate this user?')">Deactivate</button>
+                </form>
+              <?php else: ?>
+                <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Deactivate</span>
+              <?php endif; ?>
+            <?php else: ?>
+              <form method="post" style="display:inline;">
+                <input type="hidden" name="action" value="reactivate_user">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+                <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
+                <button class="btn">Reactivate</button>
+              </form>
+            <?php endif; ?>
 
-    <div style="display:flex; gap:10px; align-items:center; margin:10px 0;">
-      <button class="btn" id="bulkBtn" disabled>Delete selected</button>
-      <div style="font-size:12px;opacity:.7">Synapse v2 delete is asynchronous</div>
-    </div>
+            <button class="btn" type="button" onclick="openPwd('<?= htmlspecialchars($uid, ENT_QUOTES) ?>')">Change Password</button>
 
-    <table class="table">
-      <thead>
-        <tr>
-          <th style="text-align:center;width:40px"><input type="checkbox" id="checkAll"></th>
-          <th>Name</th>
-          <th>Room ID</th>
-          <th>Type</th>
-          <th>Visibility</th>
-          <th>Members</th>
-          <th>Encrypted</th>
-          <th>Creator</th>
-        </tr>
-      </thead>
-      <tbody>
-        <?php if (!$rooms): ?>
-          <tr><td colspan="8" style="padding:14px;opacity:.7;text-align:center">No rooms</td></tr>
-        <?php else: foreach ($rooms as $r):
-          $rid = $r['room_id']; $name = $r['name'] ?? '(no name)';
-          $rtype = $r['room_type'] ?? 'room';
-          $vis = ($r['public']??false) ? 'public' : ($r['join_rules'] ?? 'invite');
-          $mem = (int)($r['joined_members'] ?? 0);
-          $enc = !empty($r['encryption']) ? 'yes' : 'no';
-          $creator = $r['creator'] ?? '—';
-        ?>
-        <tr>
-          <td style="text-align:center"><input class="roomChk" type="checkbox" name="room_ids[]" value="<?= htmlspecialchars($rid) ?>"></td>
-          <td><?= htmlspecialchars($name) ?></td>
-          <td style="font-family:monospace"><?= htmlspecialchars($rid) ?></td>
-          <td><?= htmlspecialchars($rtype) ?></td>
-          <td><?= htmlspecialchars($vis) ?></td>
-          <td><?= $mem ?></td>
-          <td><?= $enc ?></td>
-          <td><?= htmlspecialchars($creator) ?></td>
-        </tr>
-        <?php endforeach; endif; ?>
-      </tbody>
-    </table>
-  </form>
+            <?php if (!$isAdm): ?>
+              <form method="post" style="display:inline;">
+                <input type="hidden" name="action" value="toggle_admin">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+                <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
+                <input type="hidden" name="make_admin" value="1">
+                <button class="btn" onclick="return confirm('Grant admin to this user?')">Make Admin</button>
+              </form>
+            <?php else: ?>
+              <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
+                <form method="post" style="display:inline;">
+                  <input type="hidden" name="action" value="toggle_admin">
+                  <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+                  <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
+                  <button class="btn" onclick="return confirm('Revoke admin from this user?')">Remove Admin</button>
+                </form>
+              <?php else: ?>
+                <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Remove Admin</span>
+              <?php endif; ?>
+            <?php endif; ?>
+          </div>
+        </td>
+      </tr>
+    <?php endforeach; endif; ?>
+    </tbody>
+  </table>
 
-  <?php if ($pages>1): ?>
-    <div class="pagination" style="display:flex;gap:8px;justify-content:center;margin-top:14px">
+  <?php if ($totalPages > 1): ?>
+    <div class="pagination" style="display:flex;gap:8px;justify-content:center;margin-top:14px;">
       <?php
-        $base = 'index.php?page=rooms&r_per_page='.$r_per.'&r_search='.urlencode($r_search);
-        if ($r_page>1) echo '<a class="btn" href="'.$base.'&r_page=1">First</a><a class="btn" href="'.$base.'&r_page='.($r_page-1).'">Prev</a>';
-        for ($i=max(1,$r_page-2);$i<=min($pages,$r_page+2);$i++){
-          if ($i==$r_page) echo '<span class="btn" style="background:#2a3038;cursor:default">'.$i.'</span>';
-          else echo '<a class="btn" href="'.$base.'&r_page='.$i.'">'.$i.'</a>';
-        }
-        if ($r_page<$pages) echo '<a class="btn" href="'.$base.'&r_page='.($r_page+1).'">Next</a><a class="btn" href="'.$base.'&r_page='.$pages.'">Last</a>';
+        $base = 'index.php?page=users'
+              . '&per_page='.$perPage
+              . '&search='.urlencode($search)
+              . ($showDeactivated?'&show_deactivated=1':'');
+        $start = max(1, $page-2);
+        $end   = min($totalPages, $page+2);
       ?>
+      <?php if ($page > 1): ?>
+        <a class="btn" href="<?= $base.'&page_num=1' ?>">First</a>
+        <a class="btn" href="<?= $base.'&page_num='.($page-1) ?>">Prev</a>
+      <?php endif; ?>
+      <?php for ($i=$start;$i<=$end;$i++): ?>
+        <?php if ($i==$page): ?>
+          <span class="btn" style="background:#2a3038;cursor:default;"><?= $i ?></span>
+        <?php else: ?>
+          <a class="btn" href="<?= $base.'&page_num='.$i ?>"><?= $i ?></a>
+        <?php endif; ?>
+      <?php endfor; ?>
+      <?php if ($page < $totalPages): ?>
+        <a class="btn" href="<?= $base.'&page_num='.($page+1) ?>">Next</a>
+        <a class="btn" href="<?= $base.'&page_num='.$totalPages ?>">Last</a>
+      <?php endif; ?>
     </div>
   <?php endif; ?>
 </div>
 
+<!-- Password modal -->
+<div id="pwdModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(24,26,32,.95);z-index:1000;">
+  <div class="modal-content" style="background:#23272E;border:1px solid #30363D;border-radius:10px;max-width:480px;margin:10% auto;padding:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3>Change Password</h3>
+      <button class="btn" onclick="closePwd()">✕</button>
+    </div>
+    <form method="post" id="pwdForm" style="margin-top:10px;">
+      <input type="hidden" name="action" value="change_password">
+      <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+      <input type="hidden" name="user_id" id="pwdUid" value="">
+      <div style="margin:10px 0;">
+        <label>New password</label>
+        <input type="password" name="new_password" id="pwdNew"
+               placeholder="Minimum 6 characters" required minlength="6"
+               style="width:100%;padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
+        <button class="btn" type="submit">Change</button>
+        <button class="btn" type="button" onclick="closePwd()" style="background:#666;">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
-  const all = document.getElementById('checkAll');
-  const btn = document.getElementById('bulkBtn');
-  function syncBtn(){ btn.disabled = document.querySelectorAll('.roomChk:checked').length===0; }
-  if (all) all.addEventListener('change', () => {
-    document.querySelectorAll('.roomChk').forEach(cb => cb.checked = all.checked);
-    syncBtn();
+  function openPwd(uid){
+    document.getElementById('pwdUid').value = uid;
+    document.getElementById('pwdNew').value = '';
+    document.getElementById('pwdModal').style.display = 'block';
+    setTimeout(()=>document.getElementById('pwdNew').focus(), 50);
+  }
+  function closePwd(){
+    document.getElementById('pwdModal').style.display = 'none';
+  }
+  // Close on outside click
+  window.addEventListener('click', (e)=>{
+    const m = document.getElementById('pwdModal');
+    if (e.target === m) closePwd();
   });
-  document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('roomChk')) syncBtn(); });
+  // Close on Esc
+  document.addEventListener('keydown', (e)=>{
+    if (e.key === 'Escape') closePwd();
+  });
 </script>
