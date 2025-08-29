@@ -1,26 +1,32 @@
 <?php
-// users.php — Users section (requires login)
+
+if (!function_exists('isLoggedIn')) { require __DIR__ . '/bootstrap.php'; }
 require_login();
 
 $error   = $_GET['error']   ?? null;
 $success = $_GET['success'] ?? null;
 
-// ---------- Helpers to preserve filters on redirect ----------
+/* -------- helpers -------- */
 function users_redirect_with_state($extra = []) {
     $params = [
-        'page'        => 'users',
-        'per_page'    => $_GET['per_page']    ?? 50,
-        'search'      => $_GET['search']      ?? '',
+        'page'             => 'users',
+        'per_page'         => $_GET['per_page']    ?? 50,
+        'search'           => $_GET['search']      ?? '',
         'show_deactivated' => isset($_GET['show_deactivated']) ? '1' : null,
     ];
     foreach ($extra as $k=>$v) { $params[$k] = $v; }
-    // remove nulls
     $params = array_filter($params, fn($v) => $v !== null);
     header('Location: index.php?'.http_build_query($params));
     exit;
 }
+function http_fail_msg(array $res, string $fallback='Request failed'){
+    $code = (int)($res['http_code'] ?? 0);
+    $body = (string)($res['response'] ?? ($res['error'] ?? ''));
+    $snippet = $body !== '' ? ' — '.$code.' / '.mb_substr($body,0,200) : ($code ? ' — '.$code : '');
+    return $fallback.$snippet;
+}
 
-// ---------- Actions ----------
+/* -------- actions -------- */
 if (($_POST['action'] ?? '') === 'create_user') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
@@ -42,11 +48,11 @@ if (($_POST['action'] ?? '') === 'create_user') {
                 $payload,
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-            if ($res['success'] && in_array($res['http_code'],[200,201],true)) {
+            if (($res['success'] ?? false) && in_array((int)$res['http_code'],[200,201],true)) {
                 logAction('create user @'.$u.':'.MATRIX_DOMAIN.($isAdmin?' (admin)':''));
                 users_redirect_with_state(['success'=>'User created']);
             } else {
-                $error = 'Failed to create user: '.($res['response'] ?? $res['error'] ?? 'unknown');
+                $error = http_fail_msg($res, 'Failed to create user');
             }
         }
     }
@@ -66,11 +72,11 @@ if (($_POST['action'] ?? '') === 'deactivate_user') {
                 json_encode(['deactivated'=>true]),
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-            if ($res['success'] && $res['http_code']===200) {
+            if (($res['success'] ?? false) && (int)$res['http_code']===200) {
                 logAction('deactivate '.$uid);
                 users_redirect_with_state(['success'=>'User deactivated']);
             } else {
-                $error = 'Failed to deactivate: '.($res['response'] ?? $res['error'] ?? 'unknown');
+                $error = http_fail_msg($res, 'Failed to deactivate');
             }
         }
     }
@@ -88,11 +94,11 @@ if (($_POST['action'] ?? '') === 'reactivate_user') {
                 json_encode(['deactivated'=>false]),
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-            if ($res['success'] && $res['http_code']===200) {
+            if (($res['success'] ?? false) && (int)$res['http_code']===200) {
                 logAction('reactivate '.$uid);
                 users_redirect_with_state(['success'=>'User reactivated']);
             } else {
-                $error = 'Failed to reactivate: '.($res['response'] ?? $res['error'] ?? 'unknown');
+                $error = http_fail_msg($res, 'Failed to reactivate');
             }
         }
     }
@@ -113,11 +119,11 @@ if (($_POST['action'] ?? '') === 'toggle_admin') {
                 json_encode(['admin'=>$make]),
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-            if ($res['success'] && $res['http_code']===200) {
+            if (($res['success'] ?? false) && (int)$res['http_code']===200) {
                 logAction(($make?'grant':'revoke').' admin '.$uid);
                 users_redirect_with_state(['success'=>$make?'Admin granted':'Admin revoked']);
             } else {
-                $error = 'Failed to change admin: '.($res['response'] ?? $res['error'] ?? 'unknown');
+                $error = http_fail_msg($res, 'Failed to change admin');
             }
         }
     }
@@ -138,18 +144,18 @@ if (($_POST['action'] ?? '') === 'change_password') {
                 json_encode(['new_password'=>$npw]),
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-            if ($res['success'] && $res['http_code']===200) {
+            if (($res['success'] ?? false) && (int)$res['http_code']===200) {
                 logAction('change password '.$uid);
                 users_redirect_with_state(['success'=>'Password changed']);
             } else {
-                $error = 'Failed to change password: '.($res['response'] ?? $res['error'] ?? 'unknown');
+                $error = http_fail_msg($res, 'Failed to change password');
             }
         }
     }
 }
 
-// ---------- Fetch list ----------
-$page    = max(1, (int)($_GET['page_num'] ?? 1)); // page_num чтобы не конфликтовать с router=page
+/* -------- fetch list -------- */
+$page    = max(1, (int)($_GET['page_num'] ?? 1)); // page_num ≠ router=page
 $perPage = in_array((int)($_GET['per_page'] ?? 50), [10,50,100], true) ? (int)($_GET['per_page']) : 50;
 $search  = trim($_GET['search'] ?? '');
 $showDeactivated = isset($_GET['show_deactivated']);
@@ -160,14 +166,14 @@ if ($showDeactivated)      $apiUrl .= '&deactivated=true';
 
 $listRes = makeMatrixRequest($apiUrl,'GET',null,['Authorization: Bearer '.$_SESSION['admin_token']]);
 $users = []; $total = 0;
-if ($listRes['success'] && $listRes['http_code']===200) {
+if (($listRes['success'] ?? false) && (int)$listRes['http_code']===200) {
     $data  = json_decode($listRes['response'], true) ?: [];
     $users = $data['users'] ?? [];
     $total = (int)($data['total'] ?? count($users));
 } else {
-    $error = $error ?: 'Failed to load users list';
+    $error = $error ?: http_fail_msg($listRes, 'Failed to load users list');
 }
-$totalPages = max(1, (int)ceil($total / $perPage));
+$totalPages = max(1, (int)ceil(max(1,$total) / $perPage));
 ?>
 
 <?php if ($error): ?>
@@ -191,7 +197,7 @@ $totalPages = max(1, (int)ceil($total / $perPage));
         <input type="checkbox" name="is_admin"> Admin
       </label>
     </div>
-    <div style="margin-top:10px;"><button class="btn">Create</button></div>
+    <div style="margin-top:10px;"><button class="btn" type="submit">Create</button></div>
   </form>
 </div>
 
@@ -211,7 +217,7 @@ $totalPages = max(1, (int)ceil($total / $perPage));
     <label style="display:flex;align-items:center;gap:6px;">
       <input type="checkbox" name="show_deactivated" <?= $showDeactivated?'checked':'' ?>> show deactivated
     </label>
-    <button class="btn">Search</button>
+    <button class="btn" type="submit">Search</button>
     <?php if ($search !== '' || $showDeactivated || $perPage !== 50): ?>
       <a class="btn" href="index.php?page=users" style="background:#666">Clear</a>
     <?php endif; ?>
@@ -236,7 +242,7 @@ $totalPages = max(1, (int)ceil($total / $perPage));
     <?php if (!$users): ?>
       <tr><td colspan="6" style="text-align:center;opacity:.7;padding:14px;">No users</td></tr>
     <?php else: foreach ($users as $u):
-        $uid = $u['name'];
+        $uid = (string)$u['name'];
         $isAdm = !empty($u['admin']);
         $dead = !empty($u['deactivated']);
         $created = !empty($u['creation_ts']) ? date('Y-m-d H:i', $u['creation_ts']/1000) : '—';
@@ -251,41 +257,41 @@ $totalPages = max(1, (int)ceil($total / $perPage));
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
             <?php if (!$dead): ?>
               <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
-                <form method="post" style="display:inline;">
+                <form method="post" class="js-confirm-form" data-confirm="Deactivate this user?">
                   <input type="hidden" name="action" value="deactivate_user">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                   <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                  <button class="btn" onclick="return confirm('Deactivate this user?')">Deactivate</button>
+                  <button class="btn" type="submit">Deactivate</button>
                 </form>
               <?php else: ?>
                 <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Deactivate</span>
               <?php endif; ?>
             <?php else: ?>
-              <form method="post" style="display:inline;">
+              <form method="post" class="js-confirm-form" data-confirm="Reactivate this user?">
                 <input type="hidden" name="action" value="reactivate_user">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                 <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                <button class="btn">Reactivate</button>
+                <button class="btn" type="submit">Reactivate</button>
               </form>
             <?php endif; ?>
 
-            <button class="btn" type="button" onclick="openPwd('<?= htmlspecialchars($uid, ENT_QUOTES) ?>')">Change Password</button>
+            <button class="btn js-open-pwd" type="button" data-uid="<?= htmlspecialchars($uid, ENT_QUOTES) ?>">Change Password</button>
 
             <?php if (!$isAdm): ?>
-              <form method="post" style="display:inline;">
+              <form method="post" class="js-confirm-form" data-confirm="Grant admin to this user?">
                 <input type="hidden" name="action" value="toggle_admin">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                 <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
                 <input type="hidden" name="make_admin" value="1">
-                <button class="btn" onclick="return confirm('Grant admin to this user?')">Make Admin</button>
+                <button class="btn" type="submit">Make Admin</button>
               </form>
             <?php else: ?>
               <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
-                <form method="post" style="display:inline;">
+                <form method="post" class="js-confirm-form" data-confirm="Revoke admin from this user?">
                   <input type="hidden" name="action" value="toggle_admin">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                   <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                  <button class="btn" onclick="return confirm('Revoke admin from this user?')">Remove Admin</button>
+                  <button class="btn" type="submit">Remove Admin</button>
                 </form>
               <?php else: ?>
                 <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Remove Admin</span>
@@ -332,7 +338,7 @@ $totalPages = max(1, (int)ceil($total / $perPage));
   <div class="modal-content" style="background:#23272E;border:1px solid #30363D;border-radius:10px;max-width:480px;margin:10% auto;padding:20px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3>Change Password</h3>
-      <button class="btn" onclick="closePwd()">✕</button>
+      <button class="btn js-close-pwd" type="button">✕</button>
     </div>
     <form method="post" id="pwdForm" style="margin-top:10px;">
       <input type="hidden" name="action" value="change_password">
@@ -346,29 +352,10 @@ $totalPages = max(1, (int)ceil($total / $perPage));
       </div>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
         <button class="btn" type="submit">Change</button>
-        <button class="btn" type="button" onclick="closePwd()" style="background:#666;">Cancel</button>
+        <button class="btn js-close-pwd" type="button" style="background:#666;">Cancel</button>
       </div>
     </form>
   </div>
 </div>
 
-<script>
-  function openPwd(uid){
-    document.getElementById('pwdUid').value = uid;
-    document.getElementById('pwdNew').value = '';
-    document.getElementById('pwdModal').style.display = 'block';
-    setTimeout(()=>document.getElementById('pwdNew').focus(), 50);
-  }
-  function closePwd(){
-    document.getElementById('pwdModal').style.display = 'none';
-  }
-  // Close on outside click
-  window.addEventListener('click', (e)=>{
-    const m = document.getElementById('pwdModal');
-    if (e.target === m) closePwd();
-  });
-  // Close on Esc
-  document.addEventListener('keydown', (e)=>{
-    if (e.key === 'Escape') closePwd();
-  });
-</script>
+<script src="app.js" defer></script>

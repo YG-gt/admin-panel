@@ -1,13 +1,6 @@
 <?php
-// rooms.php — диагностическая версия: список комнат + создание + инвайт + массовое удаление
-// Включаем явный вывод ошибок ТОЛЬКО здесь (удали после починки)
-error_reporting(E_ALL);
-ini_set('display_errors', '1');
 
-// Мягкая защита: если запущено напрямую
-if (!function_exists('isLoggedIn')) {
-  require __DIR__ . '/bootstrap.php';
-}
+if (!function_exists('isLoggedIn')) { require __DIR__ . '/bootstrap.php'; }
 if (!isLoggedIn()) {
   echo '<div class="card"><p>Please log in to view this page.</p></div>';
   return;
@@ -16,33 +9,18 @@ if (!isLoggedIn()) {
 $error   = $_GET['error']   ?? null;
 $success = $_GET['success'] ?? null;
 
-/* ===================== Helpers ===================== */
-
-function safe_json_decode($s) {
-    if (!is_string($s) || $s === '') return [];
-    $d = json_decode($s, true);
-    return is_array($d) ? $d : [];
-}
-function show_http_debug($label, $res) {
-    echo '<div class="card alert alert-error" style="white-space:pre-wrap;">';
-    echo htmlspecialchars($label)."\n";
-    echo 'success: '.(($res['success']??false) ? 'true' : 'false')."\n";
-    echo 'http_code: '.(int)($res['http_code']??0)."\n";
-    if (!empty($res['error'])) {
-        echo 'error: '.htmlspecialchars($res['error'])."\n";
-    }
+/* ---------------- Helpers ---------------- */
+function safe_json_decode($s){ $d = json_decode((string)$s, true); return is_array($d) ? $d : []; }
+function http_fail_msg(array $res, string $fallback='Request failed'){
+    $code = (int)($res['http_code'] ?? 0);
     $body = (string)($res['response'] ?? '');
-    if ($body !== '') {
-        $short = mb_substr($body, 0, 2000);
-        echo "response (truncated):\n".htmlspecialchars($short);
-        if (mb_strlen($body) > 2000) echo "\n…(truncated)…";
-    }
-    echo '</div>';
+    $snippet = $body !== '' ? ' — '.$code.' / '.mb_substr($body,0,160) : ($code ? ' — '.$code : '');
+    return $fallback.$snippet;
 }
 
-/* ===================== Actions ===================== */
+/* ---------------- Actions ---------------- */
 
-// 1) Создание комнаты
+// Создание комнаты
 if (($_POST['action'] ?? '') === 'create_room') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
@@ -61,30 +39,20 @@ if (($_POST['action'] ?? '') === 'create_room') {
                 MATRIX_SERVER.'/_matrix/client/r0/createRoom',
                 'POST',
                 $payload,
-                [
-                    'Content-Type: application/json',
-                    'Authorization: Bearer '.$_SESSION['admin_token']
-                ]
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-            if (!($res['success'] ?? false)) {
-                $error = 'Network error during room creation';
-                logAction('failed to create room "'.$roomName.'" - network error');
-            } elseif ((int)$res['http_code'] === 200) {
-                $d = safe_json_decode($res['response'] ?? '');
-                $rid = $d['room_id'] ?? '(unknown)';
+            if (($res['success'] ?? false) && (int)$res['http_code'] === 200) {
+                $rid = safe_json_decode($res['response'])['room_id'] ?? '(unknown)';
                 $success = 'Room created successfully. Room ID: '.htmlspecialchars($rid);
                 logAction('create room "'.$roomName.'" ('.$rid.')');
             } else {
-                $error = 'Failed to create room';
-                logAction('failed to create room "'.$roomName.'" - http '.(int)$res['http_code']);
-                // Покажем диагностический блок
-                show_http_debug('createRoom failed', $res);
+                $error = http_fail_msg($res, 'Failed to create room');
+                logAction('failed to create room "'.$roomName.'"');
             }
         }
     }
 }
 
-// 2) Инвайт пользователя
 if (($_POST['action'] ?? '') === 'invite_to_room') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
@@ -99,27 +67,19 @@ if (($_POST['action'] ?? '') === 'invite_to_room') {
                 MATRIX_SERVER.'/_matrix/client/r0/rooms/'.rawurlencode($inviteRoomId).'/invite',
                 'POST',
                 $payload,
-                [
-                    'Content-Type: application/json',
-                    'Authorization: Bearer '.$_SESSION['admin_token']
-                ]
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-            if (!($res['success'] ?? false)) {
-                $error = 'Network error during invite';
-                logAction('failed to invite '.$inviteUserId.' to room '.$inviteRoomId.' - network error');
-            } elseif ((int)$res['http_code'] === 200) {
+            if (($res['success'] ?? false) && (int)$res['http_code'] === 200) {
                 $success = 'User '.htmlspecialchars($inviteUserId).' invited to room '.htmlspecialchars($inviteRoomId);
                 logAction('invite '.$inviteUserId.' to room '.$inviteRoomId);
             } else {
-                $error = 'Failed to invite user';
-                logAction('failed to invite '.$inviteUserId.' to room '.$inviteRoomId.' - http '.(int)$res['http_code']);
-                show_http_debug('invite failed', $res);
+                $error = http_fail_msg($res, 'Failed to invite user');
+                logAction('failed to invite '.$inviteUserId.' to '.$inviteRoomId);
             }
         }
     }
 }
 
-// 3) Массовое удаление (асинхронно)
 if (($_POST['action'] ?? '') === 'bulk_rooms') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error='Invalid CSRF token';
@@ -130,33 +90,42 @@ if (($_POST['action'] ?? '') === 'bulk_rooms') {
         } else {
             $ok=$fail=0;
             foreach ($ids as $rid) {
-                $resp = makeMatrixRequest(
-                    MATRIX_SERVER.'/_synapse/admin/v2/rooms/'.rawurlencode($rid),
-                    'DELETE',
-                    null,
-                    ['Authorization: Bearer '.$_SESSION['admin_token'], 'Content-Type: application/json']
+                // v2 async delete
+                $res = makeMatrixRequest(
+                    MATRIX_SERVER.'/_synapse/admin/v2/rooms/'.rawurlencode($rid).'/delete',
+                    'POST',
+                    json_encode(['block'=>false,'purge'=>true]),
+                    ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
                 );
-                if (($resp['success'] ?? false) && (int)$resp['http_code']>=200 && (int)$resp['http_code']<300) {
-                    $ok++; logAction('delete room req '.$rid);
+                if (!($res['success'] ?? false) || (int)$res['http_code'] < 200 || (int)$res['http_code'] >= 300) {
+                    // fallback to v1
+                    $res_v1 = makeMatrixRequest(
+                        MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid),
+                        'DELETE',
+                        null,
+                        ['Authorization: Bearer '.$_SESSION['admin_token']]
+                    );
+                    if (($res_v1['success'] ?? false) && (int)$res_v1['http_code'] >= 200 && (int)$res_v1['http_code'] < 300) {
+                        $ok++; logAction('delete room (v1) '.$rid);
+                    } else {
+                        $fail++; logAction('delete room FAILED '.$rid.' '.($res_v1['response']??$res_v1['error']??$res['response']??$res['error']??''));
+                    }
                 } else {
-                    $fail++; logAction('delete room FAILED '.$rid.' '.($resp['response']??$resp['error']??''));
+                    $ok++; logAction('delete room (v2) '.$rid);
                 }
             }
-            if ($fail===0) $success = "Deletion requested for $ok room(s) (async).";
-            else $error = "Requested deletion: OK $ok, failed $fail.";
+            if ($fail===0) $success = "Deletion requested for $ok room(s).";
+            else           $error   = "Requested deletion: OK $ok, failed $fail.";
         }
     }
 }
 
-/* ===================== Filters & Pagination ===================== */
 
 $r_page   = max(1,(int)($_GET['r_page']??1));
 $r_per_in = (int)($_GET['r_per_page'] ?? 50);
 $r_per    = in_array($r_per_in, [10,50,100], true) ? $r_per_in : 50;
 $r_search = trim($_GET['r_search'] ?? '');
 $from     = ($r_page-1)*$r_per;
-
-/* ===================== Fetch Rooms ===================== */
 
 $url = MATRIX_SERVER.'/_synapse/admin/v1/rooms?limit='.$r_per.'&from='.$from;
 if ($r_search!=='') $url .= '&search_term='.urlencode($r_search);
@@ -165,15 +134,13 @@ $res = makeMatrixRequest($url,'GET',null,['Authorization: Bearer '.$_SESSION['ad
 
 $rooms = []; $total = 0;
 if (($res['success'] ?? false) && (int)$res['http_code']===200) {
-    $d = safe_json_decode($res['response'] ?? '');
+    $d = safe_json_decode($res['response']);
     $rooms = $d['rooms'] ?? [];
     $total = (int)($d['total_rooms'] ?? count($rooms));
 } else {
-    $error = $error ?: 'Failed to load rooms list';
-    // Включим диагностику, чтобы видеть причину
-    show_http_debug('rooms list failed', $res);
+    $error = $error ?: http_fail_msg($res, 'Failed to load rooms list');
 }
-$pages = max(1,(int)ceil(($total ?: 1)/$r_per));
+$pages = max(1,(int)ceil(max(1,$total)/$r_per));
 ?>
 
 <?php if ($error): ?>
@@ -183,10 +150,10 @@ $pages = max(1,(int)ceil(($total ?: 1)/$r_per));
   <div class="card alert alert-success"><?= htmlspecialchars($success) ?></div>
 <?php endif; ?>
 
-<!-- Создать комнату -->
+<!-- Create Room -->
 <div class="card">
   <h2>Create Room</h2>
-  <form method="POST" style="margin-top:10px;">
+  <form method="POST" id="createRoomForm" style="margin-top:10px;">
     <input type="hidden" name="action" value="create_room">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
     <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:10px;">
@@ -202,10 +169,10 @@ $pages = max(1,(int)ceil(($total ?: 1)/$r_per));
   </form>
 </div>
 
-<!-- Пригласить пользователя -->
+<!-- Invite -->
 <div class="card">
   <h2>Invite User to Room</h2>
-  <form method="POST" style="margin-top:10px;">
+  <form method="POST" id="inviteForm" style="margin-top:10px;">
     <input type="hidden" name="action" value="invite_to_room">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
     <div style="display:grid;grid-template-columns:2fr 2fr auto;gap:10px;">
@@ -218,7 +185,7 @@ $pages = max(1,(int)ceil(($total ?: 1)/$r_per));
   </form>
 </div>
 
-<!-- Список комнат + массовое удаление -->
+<!-- List -->
 <div class="card">
   <h2>Rooms</h2>
 
@@ -239,13 +206,13 @@ $pages = max(1,(int)ceil(($total ?: 1)/$r_per));
 
   <div style="opacity:.7;margin:8px 0;">Showing <?= count($rooms) ?> of <?= $total ?> rooms</div>
 
-  <form method="POST" onsubmit="return confirm('Delete selected rooms (async)?');">
+  <form method="POST" id="bulkForm">
     <input type="hidden" name="action" value="bulk_rooms">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
 
     <div style="display:flex; gap:10px; align-items:center; margin:10px 0;">
       <button class="btn" id="bulkBtn" disabled>Delete selected</button>
-      <div style="font-size:12px;opacity:.7">Synapse v2 delete is asynchronous</div>
+      <div style="font-size:12px;opacity:.7">Synapse delete is asynchronous</div>
     </div>
 
     <table style="width:100%;border-collapse:collapse">
@@ -305,16 +272,4 @@ $pages = max(1,(int)ceil(($total ?: 1)/$r_per));
   <?php endif; ?>
 </div>
 
-<script>
-  // bulk delete helpers
-  const all = document.getElementById('checkAll');
-  const btn = document.getElementById('bulkBtn');
-  function syncBtn(){ if(btn) btn.disabled = document.querySelectorAll('.roomChk:checked').length===0; }
-  if (all) all.addEventListener('change', () => {
-    document.querySelectorAll('.roomChk').forEach(cb => cb.checked = all.checked);
-    syncBtn();
-  });
-  document.addEventListener('change', e => {
-    if (e.target.classList && e.target.classList.contains('roomChk')) syncBtn();
-  });
-</script>
+<script src="app.js" defer></script>
