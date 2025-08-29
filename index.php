@@ -1,18 +1,27 @@
 <?php
 require __DIR__ . '/bootstrap.php';
 
-// router: ?page=users|rooms (по умолчанию users)
-$view = $_GET['page'] ?? 'users';
-$allowed = ['users','rooms'];
-if (!in_array($view, $allowed, true)) $view = 'users';
+// Определяем запрошенную страницу
+$view = $_GET['page'] ?? (isLoggedIn() ? 'users' : 'login');
+$allowed = ['login','users','rooms','logs'];
+if (!in_array($view, $allowed, true)) {
+    $view = isLoggedIn() ? 'users' : 'login';
+}
+
+// Выход
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header('Location: index.php?page=login');
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Matrix Admin Panel - <?= htmlspecialchars(MATRIX_DOMAIN) ?></title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <title>Matrix Admin — <?= htmlspecialchars(MATRIX_DOMAIN) ?></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="layout">
@@ -20,34 +29,34 @@ if (!in_array($view, $allowed, true)) $view = 'users';
     <div class="brand">Matrix Admin</div>
 
     <div class="menu">
-      <a href="index.php?page=users" class="<?= $view==='users'?'active':'' ?>">👤 Users</a>
-      <a href="index.php?page=rooms" class="<?= $view==='rooms'?'active':'' ?>"># Rooms</a>
-    </div>
-
-    <div style="margin-top:auto">
-      <?php if (isLoggedIn()): ?>
-        <div style="font-size:12px; opacity:.8; margin-bottom:10px;">
-          <?= htmlspecialchars(currentUser()) ?>
-        </div>
-        <a class="logout" href="index.php?page=users&logout=1">Logout</a>
+      <?php if (!isLoggedIn()): ?>
+        <a href="index.php?page=login" class="<?= $view==='login'?'active':'' ?>">🔐 Login</a>
+      <?php else: ?>
+        <a href="index.php?page=users" class="<?= $view==='users'?'active':'' ?>">👤 Users</a>
+        <a href="index.php?page=rooms" class="<?= $view==='rooms'?'active':'' ?>"># Rooms</a>
+        <a href="index.php?page=logs"  class="<?= $view==='logs' ?'active':'' ?>">🗒️ Logs</a>
       <?php endif; ?>
     </div>
+
+    <?php if (isLoggedIn()): ?>
+      <div class="sidebar-bottom">
+        <div class="me"><?= htmlspecialchars(currentUser()) ?></div>
+        <a class="logout" href="index.php?logout=1">Logout</a>
+      </div>
+    <?php endif; ?>
   </aside>
 
   <main class="content">
-    <div class="card row">
-      <h1 style="color:#58A6FF;margin:0;">Matrix Admin Panel — <?= htmlspecialchars(MATRIX_DOMAIN) ?></h1>
-      <?php if (!isLoggedIn()): ?>
-        <div style="font-size:12px;opacity:.8">please login</div>
-      <?php endif; ?>
-    </div>
-
     <?php
-      // Подключаем выбранную страницу
-      if ($view === 'users') {
-          include __DIR__ . '/users.php';
+      if (!isLoggedIn() && $view !== 'login') {
+        $view = 'login';
+      }
+
+      $file = __DIR__ . "/{$view}.php";
+      if (is_file($file)) {
+        include $file;
       } else {
-          include __DIR__ . '/rooms.php';
+        echo '<div class="card"><p>View not found.</p></div>';
       }
     ?>
   </main>

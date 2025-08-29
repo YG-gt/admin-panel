@@ -1,327 +1,138 @@
 <?php
-session_start();
 
-// Load configuration
-$config = parse_ini_file(__DIR__ . '/config.ini', true);
-if (!$config) {
-    die('Configuration file not found or invalid');
+if (!function_exists('isLoggedIn')) {
+  require __DIR__ . '/bootstrap.php';
 }
 
-define('MATRIX_DOMAIN', $config['matrix']['domain']);
-define('LOG_FILE', $config['security']['log_file']);
-
-// Check if admin is logged in
-$isLoggedIn = isset($_SESSION['admin_token']);
-
-if (!$isLoggedIn) {
-    header('Location: admin.php');
-    exit;
+if (!isLoggedIn()) {
+  echo '<div class="card"><p>Please log in to view logs.</p></div>';
+  return;
 }
 
-// Get pagination parameters
-$page = max(1, (int)($_GET['page'] ?? 1));
-$perPageParam = $_GET['per_page'] ?? 10;
-$perPage = in_array($perPageParam, [10, 50, 100]) ? (int)$perPageParam : 10;
-$search = trim($_GET['search'] ?? '');
-
-
-
-// Read and process log file
-$logs = [];
-$totalLogs = 0;
-
-if (file_exists(LOG_FILE)) {
-    $logContent = file_get_contents(LOG_FILE);
-    if ($logContent !== false) {
-        $allLogs = array_reverse(explode("\n", trim($logContent)));
-        
-        // Remove empty lines
-        $allLogs = array_filter($allLogs, function($log) {
-            return trim($log) !== '';
-        });
-        
-        // Reset array keys after filtering
-        $allLogs = array_values($allLogs);
-        
-        // Filter logs by search term
-        if ($search) {
-            $allLogs = array_filter($allLogs, function($log) use ($search) {
-                return stripos($log, $search) !== false;
-            });
-            // Reset keys again after search filtering
-            $allLogs = array_values($allLogs);
+if (($_POST['action'] ?? '') === 'export_logs') {
+  if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+    echo '<div class="card"><div class="alert alert-error">Invalid CSRF token</div></div>';
+  } else {
+    $rows = [];
+    if (file_exists(LOG_FILE)) {
+      $lines = file(LOG_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+      foreach ($lines as $line) {
+        if (preg_match('/^\[(.*?)\]\s+(.*?)\s+→\s+(.*)$/u', $line, $m)) {
+          $rows[] = [$m[1], $m[2], $m[3]];
         }
-        
-        $totalLogs = count($allLogs);
-        $offset = ($page - 1) * $perPage;
-        $logs = array_slice($allLogs, $offset, $perPage);
+      }
     }
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="matrix-audit-'.date('Y-m-d-H-i-s').'.csv"');
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Timestamp','User','Action']);
+    foreach ($rows as $r) fputcsv($out, $r);
+    fclose($out);
+    exit;
+  }
 }
 
-$totalPages = ($totalLogs > 0 && $perPage > 0) ? ceil($totalLogs / $perPage) : 1;
+$q        = trim($_GET['q'] ?? '');
+$lpp      = (int)($_GET['l_per_page'] ?? 50);
+if (!in_array($lpp, [10,25,50,100,200], true)) $lpp = 50;
+$lp       = max(1, (int)($_GET['l_page'] ?? 1));
+
+$entries = [];
+if (file_exists(LOG_FILE)) {
+  $lines = file(LOG_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+  foreach ($lines as $line) {
+    if (preg_match('/^\[(.*?)\]\s+(.*?)\s+→\s+(.*)$/u', $line, $m)) {
+      $entries[] = ['ts'=>$m[1],'user'=>$m[2],'action'=>$m[3]];
+    }
+  }
+}
+usort($entries, fn($a,$b)=>strcmp($b['ts'],$a['ts']));
+
+if ($q !== '') {
+  $entries = array_values(array_filter($entries, function($e) use($q){
+    return stripos($e['ts'],$q)!==false || stripos($e['user'],$q)!==false || stripos($e['action'],$q)!==false;
+  }));
+}
+
+$total = count($entries);
+$totalPages = max(1, (int)ceil($total / $lpp));
+$offset = ($lp - 1) * $lpp;
+$entriesPage = array_slice($entries, $offset, $lpp);
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Action Logs - <?= MATRIX_DOMAIN ?></title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body {
-            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Menlo', monospace;
-                background: #181A20;
-                color: #C9D1D9;
-            min-height: 100vh;
-        }
-        
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        
-        .header {
-            position: relative;
-            text-align: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: rgba(0, 255, 0, 0.1);
-            border-radius: 10px;
-                border: 1px solid #30363D;
-        }
-        
-        .header h1 {
-            font-size: 2.5rem;
-                color: #58A6FF;
-                text-shadow: 0 0 10px #30363D;
-            margin-bottom: 10px;
-        }
-        
-        .nav-links {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-        }
-        
-        .nav-links a {
-                color: #58A6FF;
-            text-decoration: none;
-            padding: 8px 16px;
-                border: 1px solid #30363D;
-            border-radius: 5px;
-            margin-right: 10px;
-            transition: all 0.3s ease;
-                background: #23272E;
-        }
-        
-        .nav-links a:hover {
-                background: #21262C;
-                color: #79C0FF;
-        }
-        
-        .logout-link {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            color: #ff4444;
-            text-decoration: none;
-            padding: 10px 20px;
-            border: 1px solid #ff4444;
-            border-radius: 5px;
-            font-size: 14px;
-                background: #23272E;
-        }
-        
-        .logout-link:hover {
-                background: #21262C;
-                color: #ff6666;
-        }
-        
-        .card {
-                background: #23272E;
-                border: 1px solid #30363D;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-                box-shadow: 0 0 20px rgba(40, 50, 60, 0.2);
-        }
-        
-        .search-form {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            align-items: center;
-        }
-        
-        .search-form input[type="text"] {
-            flex: 1;
-            padding: 10px;
-                background: #181A20;
-                border: 1px solid #30363D;
-            border-radius: 5px;
-                color: #C9D1D9;
-        }
-        
-        .search-form select {
-            padding: 10px;
-                background: #181A20;
-                border: 1px solid #30363D;
-            border-radius: 5px;
-                color: #C9D1D9;
-        }
-        
-        .btn {
-                background: linear-gradient(90deg, #30363D 0%, #21262C 100%);
-                color: #58A6FF;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            text-decoration: none;
-            display: inline-block;
-                transition: all 0.3s ease;
-            }
-            .btn:hover {
-                background: #21262C;
-                color: #79C0FF;
-                box-shadow: 0 5px 15px rgba(88, 166, 255, 0.1);
-            }
-        .log-container {
-                background: #181A20;
-                border: 1px solid #30363D;
-            border-radius: 5px;
-            padding: 15px;
-            max-height: 600px;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 12px;
-            white-space: pre-line;
-            margin-bottom: 20px;
-                color: #00ff00; /* keep log text green */
-        }
-        
-        .log-entry {
-            padding: 5px 0;
-            border-bottom: 1px solid rgba(0, 255, 0, 0.1);
-        }
-        
-        .log-entry:last-child {
-            border-bottom: none;
-        }
-        
-        .pagination {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 10px;
-            margin: 20px 0;
-        }
-        
-        .pagination a, .pagination span {
-            padding: 8px 12px;
-            border: 1px solid #00ff00;
-            border-radius: 5px;
-            text-decoration: none;
-            color: #00ff00;
-        }
-        
-        .pagination a:hover {
-            background: rgba(0, 255, 0, 0.2);
-        }
-        
-        .pagination .current {
-            background: rgba(0, 255, 0, 0.3);
-            font-weight: bold;
-        }
-        
-        .stats {
-            text-align: center;
-            margin: 10px 0;
-            opacity: 0.7;
-            font-size: 14px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="nav-links">
-                <a href="admin.php">← Back to Admin</a>
-            </div>
-            <h1>Action Logs</h1>
-            <p><?= MATRIX_DOMAIN ?> - Activity Monitor</p>
-            <a href="admin.php?logout=1" class="logout-link">Logout (<?= htmlspecialchars($_SESSION['admin_user']) ?>)</a>
-        </div>
 
-        <div class="card">
-            <h2>Search & Filter</h2>
-            <form method="GET" class="search-form">
-                <input type="text" name="search" placeholder="Search logs..." value="<?= htmlspecialchars($search) ?>">
-                <select name="per_page">
-                    <option value="10" <?= $perPage == 10 ? 'selected' : '' ?>>10 per page</option>
-                    <option value="50" <?= $perPage == 50 ? 'selected' : '' ?>>50 per page</option>
-                    <option value="100" <?= $perPage == 100 ? 'selected' : '' ?>>100 per page</option>
-                </select>
-                <button type="submit" class="btn">Search</button>
-                <?php if ($search): ?>
-                    <a href="logs.php" class="btn" style="background: #666;">Clear</a>
-                <?php endif; ?>
-            </form>
-        </div>
+<div class="card">
+  <h2>Logs</h2>
 
-        <div class="card">
-            <h2>Activity Log</h2>
-            <div class="stats">
-                Showing <?= count($logs) ?> of <?= $totalLogs ?> entries
-                <?php if ($search): ?>
-                    (filtered by "<?= htmlspecialchars($search) ?>")
-                <?php endif; ?>
-            </div>
-            
-            <?php if (empty($logs) && $totalLogs == 0): ?>
-                <p style="text-align: center; opacity: 0.7; padding: 50px;">
-                    <?= $search ? 'No logs found matching your search.' : 'No logs available.' ?>
-                </p>
-            <?php elseif (empty($logs) && $totalLogs > 0): ?>
-                <p style="text-align: center; opacity: 0.7; padding: 50px;">
-                    No logs on this page. Try page 1.
-                </p>
-            <?php else: ?>
-                <div class="log-container">
-                    <?php foreach ($logs as $log): ?>
-                        <div class="log-entry"><?= htmlspecialchars($log) ?></div>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
-            
-            <?php if ($totalPages > 1): ?>
-                <div class="pagination">
-                    <?php if ($page > 1): ?>
-                        <a href="?page=1&per_page=<?= $perPage ?>&search=<?= urlencode($search) ?>">First</a>
-                        <a href="?page=<?= $page - 1 ?>&per_page=<?= $perPage ?>&search=<?= urlencode($search) ?>">Previous</a>
-                    <?php endif; ?>
-                    
-                    <?php
-                    $start = max(1, $page - 2);
-                    $end = min($totalPages, $page + 2);
-                    for ($i = $start; $i <= $end; $i++):
-                    ?>
-                        <?php if ($i == $page): ?>
-                            <span class="current"><?= $i ?></span>
-                        <?php else: ?>
-                            <a href="?page=<?= $i ?>&per_page=<?= $perPage ?>&search=<?= urlencode($search) ?>"><?= $i ?></a>
-                        <?php endif; ?>
-                    <?php endfor; ?>
-                    
-                    <?php if ($page < $totalPages): ?>
-                        <a href="?page=<?= $page + 1 ?>&per_page=<?= $perPage ?>&search=<?= urlencode($search) ?>">Next</a>
-                        <a href="?page=<?= $totalPages ?>&per_page=<?= $perPage ?>&search=<?= urlencode($search) ?>">Last</a>
-                    <?php endif; ?>
-                </div>
-            <?php endif; ?>
-        </div>
-        
-        <div style="text-align: center; margin-top: 30px; opacity: 0.7;">
-        </div>
+  <form class="row" method="get" style="gap:10px; align-items:center;">
+    <input type="hidden" name="page" value="logs">
+    <input class="input" type="text" name="q" placeholder="Filter by text…" value="<?= htmlspecialchars($q) ?>">
+    <select class="input" name="l_per_page">
+      <?php foreach ([10,25,50,100,200] as $n): ?>
+        <option value="<?= $n ?>" <?= $lpp===$n?'selected':'' ?>><?= $n ?> per page</option>
+      <?php endforeach; ?>
+    </select>
+    <button class="btn" type="submit">Search</button>
+    <?php if ($q !== '' || $lpp !== 50): ?>
+      <a class="btn" style="background:#666" href="?page=logs">Clear</a>
+    <?php endif; ?>
+  </form>
+
+  <form method="post" style="margin-top:10px;">
+    <input type="hidden" name="action" value="export_logs">
+    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+    <button class="btn">📥 Download CSV</button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="stats">
+    Showing <?= count($entriesPage) ?> of <?= $total ?> log entries
+    <?php if ($q !== ''): ?>(filtered by "<?= htmlspecialchars($q) ?>")<?php endif; ?>
+  </div>
+
+  <table class="table" style="margin-top:12px;">
+    <thead>
+      <tr>
+        <th style="width:200px">Timestamp</th>
+        <th style="width:280px">User</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      <?php if (!$entriesPage): ?>
+        <tr><td colspan="3" style="text-align:center; color:#8B949E;">No entries</td></tr>
+      <?php else: foreach ($entriesPage as $e): ?>
+        <tr>
+          <td><?= htmlspecialchars($e['ts']) ?></td>
+          <td><?= htmlspecialchars($e['user']) ?></td>
+          <td><?= htmlspecialchars($e['action']) ?></td>
+        </tr>
+      <?php endforeach; endif; ?>
+    </tbody>
+  </table>
+
+  <?php if ($totalPages > 1): ?>
+    <div class="pagination">
+      <?php
+        $params = 'page=logs&l_per_page='.$lpp.'&q='.urlencode($q);
+        $start = max(1, $lp-2);
+        $end   = min($totalPages, $lp+2);
+      ?>
+      <?php if ($lp > 1): ?>
+        <a href="?<?= $params ?>&l_page=1">First</a>
+        <a href="?<?= $params ?>&l_page=<?= $lp-1 ?>">Previous</a>
+      <?php endif; ?>
+      <?php for ($i=$start; $i<=$end; $i++): ?>
+        <?php if ($i==$lp): ?>
+          <span class="current"><?= $i ?></span>
+        <?php else: ?>
+          <a href="?<?= $params ?>&l_page=<?= $i ?>"><?= $i ?></a>
+        <?php endif; ?>
+      <?php endfor; ?>
+      <?php if ($lp < $totalPages): ?>
+        <a href="?<?= $params ?>&l_page=<?= $lp+1 ?>">Next</a>
+        <a href="?<?= $params ?>&l_page=<?= $totalPages ?>">Last</a>
+      <?php endif; ?>
     </div>
-</body>
-</html> 
+  <?php endif; ?>
+</div>

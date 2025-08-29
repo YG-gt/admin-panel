@@ -137,3 +137,10 @@ table tr:hover {
 .alert-error {
     color: #ff4444;
 }
+
+.menu a.active {
+    background: #2a3038;
+    color: #79C0FF;
+    border-color: #3b4450;
+    font-weight: bold;
+}
