@@ -249,7 +249,64 @@ if (($_POST['action'] ?? '') === 'login' && !$isLoggedIn) {
         }
     }
 }
+// ===== Rooms: bulk actions (delete via admin v2, async) =====
+if (($_POST['action'] ?? '') === 'bulk_rooms' && $isLoggedIn) {
+    $csrfToken = $_POST['csrf_token'] ?? '';
+    $op = $_POST['bulk_op'] ?? '';
+    $ids = array_filter((array)($_POST['room_ids'] ?? []), 'strlen');
 
+    // сохранить параметры пагинации/поиска для возврата
+    $r_page = (int)($_POST['r_page'] ?? 1);
+    $r_per_page = (int)($_POST['r_per_page'] ?? 50);
+    $r_search = trim($_POST['r_search'] ?? '');
+
+    if (!verifyCsrf($csrfToken)) {
+        $error = 'Invalid CSRF token';
+    } elseif (empty($ids)) {
+        $error = 'No rooms selected';
+    } elseif ($op !== 'delete') {
+        $error = 'Unknown bulk operation';
+    } else {
+        $ok = 0; $fail = 0; $errors = [];
+        foreach ($ids as $rid) {
+            $res = makeMatrixRequest(
+                MATRIX_SERVER . '/_synapse/admin/v2/rooms/' . rawurlencode($rid),
+                'DELETE',
+                null,
+                [
+                    'Authorization: Bearer ' . $_SESSION['admin_token'],
+                    'Content-Type: application/json'
+                ]
+            );
+            if ($res['success'] && $res['http_code'] >= 200 && $res['http_code'] < 300) {
+                $ok++;
+                logAction('bulk delete room requested ' . $rid);
+            } else {
+                $fail++;
+                $msg = $res['response'] ?? $res['error'] ?? 'unknown';
+                $errors[] = $rid . ' => ' . $msg;
+                logAction('bulk delete room FAILED ' . $rid . ' - ' . $msg);
+            }
+        }
+        if ($fail === 0) {
+            $success = "Deletion requested for $ok room(s) (async).";
+        } else {
+            $error = "Requested deletion: OK $ok, failed $fail.";
+        }
+    }
+
+    // Возврат на список комнат с сохранением фильтров/пагинации
+    $redir = 'admin.php?r_page=' . max(1, $r_page) . '&r_per_page=' . max(10, $r_per_page);
+    if ($r_search !== '') $redir .= '&r_search=' . urlencode($r_search);
+    if (isset($_POST['page'])) $redir .= '&page=' . (int)$_POST['page'];
+    if (isset($_POST['per_page'])) $redir .= '&per_page=' . (int)$_POST['per_page'];
+    if (!empty($_POST['search'])) $redir .= '&search=' . urlencode($_POST['search']);
+    if (!empty($_POST['show_deactivated'])) $redir .= '&show_deactivated=1';
+    if (isset($success)) $redir .= '&success=' . urlencode($success);
+    if (isset($error))   $redir .= '&error='   . urlencode($error);
+    header('Location: ' . $redir);
+    exit;
+}
 // Handle user creation
 if (($_POST['action'] ?? '') === 'create_user' && $isLoggedIn) {
     $newUsername = trim($_POST['new_username'] ?? '');
@@ -1007,6 +1064,142 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
                 </form>
             </div>
 
+            <div class="card">
+    <h2>Rooms</h2>
+
+    <form method="GET" class="search-form" style="margin-top:10px;">
+        <input type="text" name="r_search" placeholder="Search rooms by name..." value="<?= htmlspecialchars($roomsSearch) ?>">
+        <select name="r_per_page">
+            <option value="10"  <?= $roomsPerPage == 10  ? 'selected' : '' ?>>10 per page</option>
+            <option value="50"  <?= $roomsPerPage == 50  ? 'selected' : '' ?>>50 per page</option>
+            <option value="100" <?= $roomsPerPage == 100 ? 'selected' : '' ?>>100 per page</option>
+        </select>
+        <button type="submit" class="btn">Search</button>
+        <?php if ($roomsSearch !== '' || $roomsPerPage != 50): ?>
+            <a href="admin.php" class="btn" style="background:#666;">Clear</a>
+        <?php endif; ?>
+        <!-- сохраняем состояние Users -->
+        <input type="hidden" name="page" value="<?= $page ?>">
+        <input type="hidden" name="per_page" value="<?= $perPage ?>">
+        <?php if (!empty($search)): ?>
+            <input type="hidden" name="search" value="<?= htmlspecialchars($search) ?>">
+        <?php endif; ?>
+        <?php if (!empty($showDeactivated)): ?>
+            <input type="hidden" name="show_deactivated" value="1">
+        <?php endif; ?>
+    </form>
+
+    <div class="stats">
+        Showing <?= count($rooms) ?> of <?= $roomsTotal ?> rooms
+        <?php if ($roomsSearch !== ''): ?>
+            (filtered by "<?= htmlspecialchars($roomsSearch) ?>")
+        <?php endif; ?>
+    </div>
+
+    <!-- Bulk actions toolbar -->
+    <form method="POST" id="roomsBulkForm" onsubmit="return roomsConfirm();">
+        <input type="hidden" name="action" value="bulk_rooms">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+        <!-- вернуть фильтры/пагинацию -->
+        <input type="hidden" name="r_page" value="<?= $roomsPage ?>">
+        <input type="hidden" name="r_per_page" value="<?= $roomsPerPage ?>">
+        <input type="hidden" name="r_search" value="<?= htmlspecialchars($roomsSearch) ?>">
+        <input type="hidden" name="page" value="<?= $page ?>">
+        <input type="hidden" name="per_page" value="<?= $perPage ?>">
+        <?php if (!empty($search)): ?>
+            <input type="hidden" name="search" value="<?= htmlspecialchars($search) ?>">
+        <?php endif; ?>
+        <?php if (!empty($showDeactivated)): ?>
+            <input type="hidden" name="show_deactivated" value="1">
+        <?php endif; ?>
+
+        <div style="display:flex; gap:10px; align-items:center; margin:10px 0;">
+            <select name="bulk_op" id="roomsBulkOp" style="padding:10px; background:#181A20; border:1px solid #30363D; color:#C9D1D9; border-radius:5px;">
+                <option value="delete">Delete selected (async)</option>
+            </select>
+            <button type="submit" class="btn" id="roomsBulkBtn" disabled>Apply to selected</button>
+            <div style="font-size:12px; color:#8B949E;">Tip: deletion via v2 is asynchronous.</div>
+        </div>
+
+        <table class="users-table">
+            <thead>
+                <tr>
+                    <th style="width:36px; text-align:center;">
+                        <input type="checkbox" id="rooms_select_all" onclick="roomsToggleAll(this)">
+                    </th>
+                    <th>Name</th>
+                    <th>Room ID</th>
+                    <th>Type</th>
+                    <th>Visibility</th>
+                    <th>Members</th>
+                    <th>Encrypted</th>
+                    <th>Creator</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php if (empty($rooms)): ?>
+                <tr><td colspan="8" style="text-align:center; color:#8B949E;">No rooms found</td></tr>
+            <?php else: ?>
+                <?php foreach ($rooms as $room): 
+                    $name = $room['name'] ?? '(no name)';
+                    $rid  = $room['room_id'] ?? '';
+                    $rtype = $room['room_type'] ?? 'room';
+                    $vis = ($room['public'] ?? false) ? 'public' : ($room['join_rules'] ?? 'invite');
+                    $members = (int)($room['joined_members'] ?? 0);
+                    $enc = !empty($room['encryption']) ? 'yes' : 'no';
+                    $creator = $room['creator'] ?? 'unknown';
+                ?>
+                <tr>
+                    <td style="text-align:center;">
+                        <input type="checkbox" class="room-chk" name="room_ids[]" value="<?= htmlspecialchars($rid) ?>">
+                    </td>
+                    <td><?= htmlspecialchars($name) ?></td>
+                    <td style="font-family:monospace;"><?= htmlspecialchars($rid) ?></td>
+                    <td><?= htmlspecialchars($rtype) ?></td>
+                    <td><?= htmlspecialchars($vis) ?></td>
+                    <td><?= $members ?></td>
+                    <td><?= $enc ?></td>
+                    <td><?= htmlspecialchars($creator) ?></td>
+                </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </form>
+
+    <?php if ($roomsTotalPages > 1): ?>
+        <div class="pagination">
+            <?php 
+                $rParams = 'r_per_page=' . $roomsPerPage . '&r_search=' . urlencode($roomsSearch);
+                $rParams .= '&page=' . $page . '&per_page=' . $perPage;
+                if (!empty($search)) $rParams .= '&search=' . urlencode($search);
+                if (!empty($showDeactivated)) $rParams .= '&show_deactivated=1';
+            ?>
+            <?php if ($roomsPage > 1): ?>
+                <a href="?r_page=1&<?= $rParams ?>">First</a>
+                <a href="?r_page=<?= $roomsPage - 1 ?>&<?= $rParams ?>">Previous</a>
+            <?php endif; ?>
+
+            <?php
+                $rStart = max(1, $roomsPage - 2);
+                $rEnd = min($roomsTotalPages, $roomsPage + 2);
+                for ($i = $rStart; $i <= $rEnd; $i++):
+            ?>
+                <?php if ($i == $roomsPage): ?>
+                    <span class="current"><?= $i ?></span>
+                <?php else: ?>
+                    <a href="?r_page=<?= $i ?>&<?= $rParams ?>"><?= $i ?></a>
+                <?php endif; ?>
+            <?php endfor; ?>
+
+            <?php if ($roomsPage < $roomsTotalPages): ?>
+                <a href="?r_page=<?= $roomsPage + 1 ?>&<?= $rParams ?>">Next</a>
+                <a href="?r_page=<?= $roomsTotalPages ?>&<?= $rParams ?>">Last</a>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
+</div>
+
                 <div class="card">
                     <h2>Create Room</h2>
                     <form method="POST">
@@ -1266,5 +1459,29 @@ $totalPages = ($totalUsers > 0 && $perPage > 0) ? ceil($totalUsers / $perPage) :
             }
         });
     </script>
+    <script>
+function roomsToggleAll(cb){
+    document.querySelectorAll('.room-chk').forEach(ch => ch.checked = cb.checked);
+    roomsUpdateBulkBtn();
+}
+function roomsUpdateBulkBtn(){
+    const any = document.querySelectorAll('.room-chk:checked').length > 0;
+    const btn = document.getElementById('roomsBulkBtn');
+    if (btn) btn.disabled = !any;
+}
+function roomsConfirm(){
+    const op = document.getElementById('roomsBulkOp')?.value || '';
+    const count = document.querySelectorAll('.room-chk:checked').length;
+    if (!count) return false;
+    if (op === 'delete') {
+        return confirm('Request deletion for ' + count + ' room(s)? (async)');
+    }
+    return true;
+}
+document.addEventListener('change', function(e){
+    if (e.target.classList.contains('room-chk')) roomsUpdateBulkBtn();
+});
+</script>
+
 </body>
 </html> 
