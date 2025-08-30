@@ -97,6 +97,28 @@ body {
     color: #fff;
 }
 
+.btn-sm {
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 5px;
+}
+
+.btn-danger.btn-sm {
+    background: linear-gradient(45deg, #ff4444, #cc0000);
+    color: #fff;
+}
+
+.btn-warning.btn-sm {
+    background: linear-gradient(45deg, #ffaa00, #cc8800);
+    color: #000;
+}
+
+.btn-info.btn-sm {
+    background: linear-gradient(45deg, #0088ff, #0066cc);
+    color: #fff;
+}
+
+
 .btn-danger:hover {
     background: #cc0000;
     color: #fff;

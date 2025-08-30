@@ -18,12 +18,10 @@ if (isset($_GET['logout'])) {
     exit;
 }
 
-// Не пускаем незалогиненных на закрытые страницы
 if (!isLoggedIn() && $view !== 'login') {
     $view = 'login';
 }
 
-// Подключаем нужный view
 $file = __DIR__ . "/{$view}.php";
 ?>
 <!DOCTYPE html>

@@ -302,7 +302,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                   <input type="hidden" name="action" value="deactivate_user">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                   <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                  <button class="btn btn-danger" type="submit">Deactivate</button>
+                  <button class="btn btn-danger btn-sm" type="submit">Deactivate</button>
                 </form>
               <?php else: ?>
                 <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Deactivate</span>
@@ -312,11 +312,11 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                 <input type="hidden" name="action" value="reactivate_user">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                 <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                <button class="btn btn-warning" type="submit">Reactivate</button>
+                <button class="btn btn-warning btn-sm" type="submit">Reactivate</button>
               </form>
             <?php endif; ?>
 
-            <button class="btn btn-info js-open-pwd" type="button" data-uid="<?= htmlspecialchars($uid, ENT_QUOTES) ?>">Change Password</button>
+            <button class="btn btn-info btn-sm js-open-pwd" type="button" data-uid="<?= htmlspecialchars($uid, ENT_QUOTES) ?>">Change Password</button>
 
             <?php if (!$isAdm): ?>
               <form method="post" class="js-confirm-form" data-confirm="Grant admin to this user?">
@@ -324,7 +324,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                 <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
                 <input type="hidden" name="make_admin" value="1">
-                <button class="btn btn-warning" type="submit">Make Admin</button>
+                <button class="btn btn-warning btn-sm" type="submit">Make Admin</button>
               </form>
             <?php else: ?>
               <?php if ($uid !== (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')): ?>
@@ -332,7 +332,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                   <input type="hidden" name="action" value="toggle_admin">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                   <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                  <button class="btn btn-danger" type="submit">Remove Admin</button>
+                  <button class="btn btn-danger btn-sm" type="submit">Remove Admin</button>
                 </form>
               <?php else: ?>
                 <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Remove Admin</span>
@@ -364,8 +364,8 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                style="width:100%;padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
       </div>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
-        <button class="btn btn-info" type="submit">Change</button>
-        <button class="btn js-close-pwd" type="button" style="background:#666;">Cancel</button>
+        <button class="btn btn-info btn-sm" type="submit">Change</button>
+        <button class="btn btn-sm js-close-pwd" type="button" style="background:#666;">Cancel</button>
       </div>
     </form>
   </div>
