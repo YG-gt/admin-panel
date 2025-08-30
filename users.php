@@ -305,7 +305,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                   <button class="btn btn-danger btn-sm" type="submit">Deactivate</button>
                 </form>
               <?php else: ?>
-                <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Deactivate</span>
+                <span class="btn btn-sm" style="background:#555;cursor:not-allowed;opacity:.6;">Deactivate</span>
               <?php endif; ?>
             <?php else: ?>
               <form method="post" class="js-confirm-form" data-confirm="Reactivate this user?">
@@ -335,7 +335,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                   <button class="btn btn-danger btn-sm" type="submit">Remove Admin</button>
                 </form>
               <?php else: ?>
-                <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Remove Admin</span>
+                <span class="btn btn-sm" style="background:#555;cursor:not-allowed;opacity:.6;">Remove Admin</span>
               <?php endif; ?>
             <?php endif; ?>
           </div>

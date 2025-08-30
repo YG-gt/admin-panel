@@ -217,3 +217,28 @@ table tr:hover {
     padding: 6px 10px;
     border-radius: 5px;
 }
+
+.table {
+    font-size: 14px;
+    line-height: 1.4;
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.table th,
+.table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #30363D;
+}
+
+.table tr:nth-child(even) {
+    background-color: #1f2229;
+}
+
+.table tr:nth-child(odd) {
+    background-color: transparent;
+}
+
+.table tr:hover {
+    background: #21262C;
+}
