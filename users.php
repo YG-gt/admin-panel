@@ -1,45 +1,46 @@
 <?php
 
+
 if (!function_exists('isLoggedIn')) { require __DIR__ . '/bootstrap.php'; }
 require_login();
 
-$error   = isset($_GET['error'])   ? $_GET['error']   : null;
-$success = isset($_GET['success']) ? $_GET['success'] : null;
+$error   = $_GET['error']   ?? null;
+$success = $_GET['success'] ?? null;
 
 /* ---------- helpers ---------- */
-function users_redirect_with_state($extra = array()) {
-    $params = array(
+function users_redirect_with_state($extra = []) {
+    $params = [
         'page'             => 'users',
-        'page_num'         => isset($_GET['page_num']) ? $_GET['page_num'] : 1,
-        'per_page'         => isset($_GET['per_page']) ? $_GET['per_page'] : 50,
-        'search'           => isset($_GET['search']) ? $_GET['search'] : '',
+        'page_num'         => $_GET['page_num'] ?? 1,
+        'per_page'         => $_GET['per_page'] ?? 50,
+        'search'           => $_GET['search'] ?? '',
         'show_deactivated' => isset($_GET['show_deactivated']) ? '1' : null,
-    );
+    ];
     foreach ($extra as $k => $v) { $params[$k] = $v; }
-    // remove nulls
-    $clean = array();
-    foreach ($params as $k => $v) { if ($v !== null) $clean[$k] = $v; }
-    header('Location: index.php?' . http_build_query($clean));
+    $params = array_filter($params, fn($v) => $v !== null);
+    header('Location: index.php?' . http_build_query($params));
     exit;
 }
 
 function http_fail_msg($res, $fallback) {
-    $code = isset($res['http_code']) ? (int)$res['http_code'] : 0;
-    $body = isset($res['response']) ? (string)$res['response'] : (isset($res['error']) ? (string)$res['error'] : '');
+    $code = $res['http_code'] ?? 0;
+    $body = $res['response'] ?? ($res['error'] ?? '');
     if ($body !== '') { $body = substr($body, 0, 300); }
     $tail = ($code ? 'HTTP '.$code : '') . ($body !== '' ? ' / '.$body : '');
     return $fallback . ($tail ? ' — '.$tail : '');
 }
 
 /* ---------- actions ---------- */
-// Create
-if (isset($_POST['action']) && $_POST['action'] === 'create_user') {
-    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
+// Create user
+if (($_POST['action'] ?? '') === 'create_user') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
     } else {
-        $u = trim(isset($_POST['new_username']) ? $_POST['new_username'] : '');
-        $p = (string)(isset($_POST['new_password']) ? $_POST['new_password'] : '');
+        $u = trim($_POST['new_username'] ?? '');
+        $p = $_POST['new_password'] ?? '';
         $isAdmin = !empty($_POST['is_admin']);
+        $displayname = trim($_POST['displayname'] ?? '');
+        $userType = trim($_POST['user_type'] ?? '');
 
         if ($u === '' || $p === '') {
             $error = 'Please enter username and password';
@@ -48,16 +49,26 @@ if (isset($_POST['action']) && $_POST['action'] === 'create_user') {
         } elseif (strlen($p) < 6) {
             $error = 'Password must be at least 6 characters';
         } else {
-            $payload = json_encode(array('password'=>$p,'admin'=>$isAdmin));
+            $payloadArr = [
+                'password' => $p,
+                'admin'    => $isAdmin,
+            ];
+            if ($displayname !== '') {
+                $payloadArr['displayname'] = $displayname;
+            }
+            if ($userType !== '') {
+                $payloadArr['user_type'] = $userType;
+            }
+
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/@'.$u.':'.MATRIX_DOMAIN,
                 'PUT',
-                $payload,
-                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
+                json_encode($payloadArr),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-            if (!empty($res['success']) && in_array((int)$res['http_code'], array(200,201), true)) {
-                logAction('create user @'.$u.':'.MATRIX_DOMAIN.($isAdmin?' (admin)':''));
-                users_redirect_with_state(array('success'=>'User created'));
+            if (!empty($res['success']) && in_array((int)$res['http_code'], [200,201], true)) {
+                logAction('create user @'.$u.':'.MATRIX_DOMAIN.($isAdmin?' (admin)':'').($userType ? ' ('.$userType.')' : ''));
+                users_redirect_with_state(['success'=>'User created']);
             } else {
                 $error = http_fail_msg($res, 'Failed to create user');
             }
@@ -185,31 +196,22 @@ if (isset($_POST['action']) && $_POST['action'] === 'change_password') {
 }
 
 /* ---------- fetch list ---------- */
-$page    = max(1, (int)(isset($_GET['page_num']) ? $_GET['page_num'] : 1)); 
-$perPage = (int)(isset($_GET['per_page']) ? $_GET['per_page'] : 50);
-if (!in_array($perPage, array(10,50,100), true)) $perPage = 50;
-$search  = trim((string)(isset($_GET['search']) ? $_GET['search'] : ''));
+$page    = max(1, (int)($_GET['page_num'] ?? 1)); 
+$perPage = (int)($_GET['per_page'] ?? 50);
+if (!in_array($perPage, [10,50,100], true)) $perPage = 50;
+$search  = trim($_GET['search'] ?? '');
 $showDeactivated = isset($_GET['show_deactivated']);
 
 $apiUrl = MATRIX_SERVER.'/_synapse/admin/v2/users?limit='.$perPage.'&from='.(($page-1)*$perPage);
 if ($search !== '')   $apiUrl .= '&name='.urlencode($search);
 if ($showDeactivated) $apiUrl .= '&deactivated=true';
 
-$listRes = makeMatrixRequest($apiUrl,'GET',null,array('Authorization: Bearer '.$_SESSION['admin_token']));
-$users = array(); $total = 0;
+$listRes = makeMatrixRequest($apiUrl,'GET',null,['Authorization: Bearer '.$_SESSION['admin_token']]);
+$users = []; $total = 0;
 if (!empty($listRes['success']) && (int)$listRes['http_code']===200) {
-    $data = json_decode($listRes['response'], true);
-    if (!is_array($data)) $data = array();
-
-    if (isset($data['users']) && is_array($data['users'])) {
-        $users = $data['users'];
-        $total = isset($data['total']) ? (int)$data['total'] : count($users);
-    } elseif (isset($data['results']) && is_array($data['results'])) {
-        $users = $data['results'];
-        $total = isset($data['count']) ? (int)$data['count'] : count($users);
-    } else {
-        $error = 'Unexpected users payload';
-    }
+    $data = json_decode($listRes['response'], true) ?: [];
+    $users = $data['users'] ?? [];
+    $total = (int)($data['total'] ?? count($users));
 } else {
     $error = $error ?: http_fail_msg($listRes, 'Failed to load users list');
 }
@@ -229,28 +231,35 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
   <form method="post" style="margin-top:10px;">
     <input type="hidden" name="action" value="create_user">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
-    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;">
-      <input class="input" name="new_username" placeholder="username (without @domain)" required
-             style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-      <input class="input" type="password" name="new_password" placeholder="password" required
-             style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;">
+      <input class="input" name="new_username" placeholder="username (without @domain)" required>
+      <input class="input" type="password" name="new_password" placeholder="password" required>
+      <input class="input" name="displayname" placeholder="display name">
+      <select class="input" name="user_type">
+        <option value="">User</option>
+        <option value="moderator">Moderator</option>
+        <option value="teamlead">Team Lead</option>
+      </select>
       <label style="display:flex;align-items:center;gap:8px;">
         <input type="checkbox" name="is_admin"> Admin
       </label>
     </div>
-    <div style="margin-top:10px;"><button class="btn" type="submit">Create</button></div>
+
+    <div style="margin-top:10px;">
+      <button class="btn btn-sm" type="submit">Create</button>
+    </div>
   </form>
 </div>
 
-<!-- Search / filters + list -->
+<!-- Users list -->
 <div class="card">
   <h2>Users</h2>
   <form method="get" style="display:flex;gap:10px;margin:12px 0;align-items:center;">
     <input type="hidden" name="page" value="users">
     <input class="input" name="search" placeholder="Search users…" value="<?= htmlspecialchars($search) ?>"
-           style="flex:1;padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-    <select class="input" name="per_page"
-            style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+           style="flex:1;">
+    <select class="input" name="per_page">
       <option value="10"  <?= $perPage===10?'selected':'' ?>>10</option>
       <option value="50"  <?= $perPage===50?'selected':'' ?>>50</option>
       <option value="100" <?= $perPage===100?'selected':'' ?>>100</option>
@@ -265,7 +274,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
   </form>
 
   <div class="stats" style="opacity:.7;margin:6px 0;">
-    Showing <?= is_array($users)?count($users):0 ?> of <?= (int)$total ?> users <?= $search!=='' ? '(filtered)' : '' ?>
+    Showing <?= count($users) ?> of <?= $total ?> users <?= $search!=='' ? '(filtered)' : '' ?>
   </div>
 
   <table class="table">
@@ -273,7 +282,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
       <tr>
         <th>User ID</th>
         <th>Display Name</th>
-        <th>Admin</th>
+        <th>Type</th>
         <th>Status</th>
         <th>Created</th>
         <th>Actions</th>
@@ -283,15 +292,30 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
     <?php if (!$users): ?>
       <tr><td colspan="6" style="text-align:center;opacity:.7;padding:14px;">No users</td></tr>
     <?php else: foreach ($users as $u):
-        $uid     = isset($u['name']) ? (string)$u['name'] : (isset($u['user_id']) ? (string)$u['user_id'] : '');
+        $uid     = $u['name'] ?? ($u['user_id'] ?? '');
         $isAdm   = !empty($u['admin']);
         $dead    = !empty($u['deactivated']);
         $created = !empty($u['creation_ts']) ? date('Y-m-d H:i', $u['creation_ts']/1000) : '—';
+
+        // Type column
+        if ($isAdm) {
+            $type = '<span style="color:#00ff88">Admin</span>';
+        } elseif (!empty($u['user_type'])) {
+            if ($u['user_type'] === 'moderator') {
+                $type = '<span style="color:#FFA500">Moderator</span>';
+            } elseif ($u['user_type'] === 'teamlead') {
+                $type = '<span style="color:#58A6FF">Team Lead</span>';
+            } else {
+                $type = htmlspecialchars(ucfirst($u['user_type']));
+            }
+        } else {
+            $type = '<span style="color:#888">User</span>';
+        }
     ?>
       <tr>
         <td><?= htmlspecialchars($uid) ?></td>
-        <td><?= htmlspecialchars(isset($u['displayname']) ? $u['displayname'] : 'N/A') ?></td>
-        <td><?= $isAdm ? '<span style="color:#00ff88">Admin</span>' : '<span style="color:#888">User</span>' ?></td>
+        <td><?= htmlspecialchars($u['displayname'] ?? 'N/A') ?></td>
+        <td><?= $type ?></td>
         <td><?= $dead ? '<span style="color:#ff6666">Inactive</span>' : '<span style="color:#58A6FF">Active</span>' ?></td>
         <td><?= $created ?></td>
         <td>
