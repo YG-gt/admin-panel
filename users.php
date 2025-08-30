@@ -140,26 +140,45 @@ if (isset($_POST['action']) && $_POST['action'] === 'toggle_admin') {
 }
 
 // Change password
+// Change password (v2 preferred, fallback to v1)
 if (isset($_POST['action']) && $_POST['action'] === 'change_password') {
     if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
-        $error='Invalid CSRF token';
+        $error = 'Invalid CSRF token';
     } else {
         $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
         $npw = (string)(isset($_POST['new_password']) ? $_POST['new_password'] : '');
         if (strlen($npw) < 6) {
-            $error='Password must be at least 6 characters';
+            $error = 'Password must be at least 6 characters';
         } elseif ($uid !== '') {
+
+            // 1) v2 modify user
+            $payloadV2 = json_encode(array('password' => $npw, 'logout_devices' => true));
             $res = makeMatrixRequest(
-                MATRIX_SERVER.'/_synapse/admin/v1/users/'.rawurlencode($uid).'/password',
-                'POST',
-                json_encode(array('new_password'=>$npw)),
-                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
+                MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
+                'PUT',
+                $payloadV2,
+                array('Content-Type: application/json', 'Authorization: Bearer '.$_SESSION['admin_token'])
             );
-            if (!empty($res['success']) && (int)$res['http_code']===200) {
+
+            $ok = !empty($res['success']) && (int)$res['http_code'] === 200;
+
+            // 2) fallback: v1 reset_password (old API)
+            if (!$ok && in_array((int)$res['http_code'], array(404,405,501), true)) {
+                $payloadV1 = json_encode(array('new_password' => $npw, 'logout_devices' => true));
+                $res = makeMatrixRequest(
+                    MATRIX_SERVER.'/_synapse/admin/v1/reset_password/'.rawurlencode($uid),
+                    'POST',
+                    $payloadV1,
+                    array('Content-Type: application/json', 'Authorization: Bearer '.$_SESSION['admin_token'])
+                );
+                $ok = !empty($res['success']) && (int)$res['http_code'] === 200;
+            }
+
+            if ($ok) {
                 logAction('change password '.$uid);
-                users_redirect_with_state(array('success'=>'Password changed'));
+                users_redirect_with_state(array('success' => 'Password changed'));
             } else {
-                $error = http_fail_msg($res,'Failed to change password');
+                $error = http_fail_msg($res, 'Failed to change password');
             }
         }
     }
