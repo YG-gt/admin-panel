@@ -3,39 +3,44 @@
 if (!function_exists('isLoggedIn')) { require __DIR__ . '/bootstrap.php'; }
 require_login();
 
-$error   = $_GET['error']   ?? null;
-$success = $_GET['success'] ?? null;
+$error   = isset($_GET['error'])   ? $_GET['error']   : null;
+$success = isset($_GET['success']) ? $_GET['success'] : null;
 
 /* ---------- helpers ---------- */
-function users_redirect_with_state(array $extra = []) {
-    $params = [
+function users_redirect_with_state($extra = array()) {
+    $params = array(
         'page'             => 'users',
-        'page_num'         => $_GET['page_num']    ?? 1,
-        'per_page'         => $_GET['per_page']    ?? 50,
-        'search'           => $_GET['search']      ?? '',
+        'page_num'         => isset($_GET['page_num']) ? $_GET['page_num'] : 1,
+        'per_page'         => isset($_GET['per_page']) ? $_GET['per_page'] : 50,
+        'search'           => isset($_GET['search']) ? $_GET['search'] : '',
         'show_deactivated' => isset($_GET['show_deactivated']) ? '1' : null,
-    ];
+    );
     foreach ($extra as $k => $v) { $params[$k] = $v; }
-    $params = array_filter($params, fn($v) => $v !== null);
-    header('Location: index.php?' . http_build_query($params));
+    // remove nulls
+    $clean = array();
+    foreach ($params as $k => $v) { if ($v !== null) $clean[$k] = $v; }
+    header('Location: index.php?' . http_build_query($clean));
     exit;
 }
-function http_fail_msg(array $res, string $fallback='Request failed'){
-    $code = (int)($res['http_code'] ?? 0);
-    $body = (string)($res['response'] ?? ($res['error'] ?? ''));
-    $tail = $body !== '' ? ' — '.$code.' / '.mb_substr($body,0,200) : ($code ? ' — '.$code : '');
-    return $fallback.$tail;
+
+function http_fail_msg($res, $fallback) {
+    $code = isset($res['http_code']) ? (int)$res['http_code'] : 0;
+    $body = isset($res['response']) ? (string)$res['response'] : (isset($res['error']) ? (string)$res['error'] : '');
+    if ($body !== '') { $body = substr($body, 0, 300); }
+    $tail = ($code ? 'HTTP '.$code : '') . ($body !== '' ? ' / '.$body : '');
+    return $fallback . ($tail ? ' — '.$tail : '');
 }
 
 /* ---------- actions ---------- */
 // Create
-if (($_POST['action'] ?? '') === 'create_user') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+if (isset($_POST['action']) && $_POST['action'] === 'create_user') {
+    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
         $error = 'Invalid CSRF token';
     } else {
-        $u = trim($_POST['new_username'] ?? '');
-        $p = (string)($_POST['new_password'] ?? '');
+        $u = trim(isset($_POST['new_username']) ? $_POST['new_username'] : '');
+        $p = (string)(isset($_POST['new_password']) ? $_POST['new_password'] : '');
         $isAdmin = !empty($_POST['is_admin']);
+
         if ($u === '' || $p === '') {
             $error = 'Please enter username and password';
         } elseif (!validateUsername($u)) {
@@ -43,16 +48,16 @@ if (($_POST['action'] ?? '') === 'create_user') {
         } elseif (strlen($p) < 6) {
             $error = 'Password must be at least 6 characters';
         } else {
-            $payload = json_encode(['password'=>$p,'admin'=>$isAdmin]);
+            $payload = json_encode(array('password'=>$p,'admin'=>$isAdmin));
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/@'.$u.':'.MATRIX_DOMAIN,
                 'PUT',
                 $payload,
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
             );
-            if (($res['success'] ?? false) && in_array((int)$res['http_code'],[200,201],true)) {
+            if (!empty($res['success']) && in_array((int)$res['http_code'], array(200,201), true)) {
                 logAction('create user @'.$u.':'.MATRIX_DOMAIN.($isAdmin?' (admin)':''));
-                users_redirect_with_state(['success'=>'User created']);
+                users_redirect_with_state(array('success'=>'User created'));
             } else {
                 $error = http_fail_msg($res, 'Failed to create user');
             }
@@ -61,110 +66,136 @@ if (($_POST['action'] ?? '') === 'create_user') {
 }
 
 // Deactivate
-if (($_POST['action'] ?? '') === 'deactivate_user') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) { $error='Invalid CSRF token'; }
-    else {
-        $uid = (string)($_POST['user_id'] ?? '');
-        if ($uid === ($_SESSION['admin_user'] ?? '')) $error='Cannot deactivate yourself';
-        elseif ($uid !== '') {
+if (isset($_POST['action']) && $_POST['action'] === 'deactivate_user') {
+    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
+        $error='Invalid CSRF token';
+    } else {
+        $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
+        if ($uid === (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')) {
+            $error='Cannot deactivate yourself';
+        } elseif ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
-                json_encode(['deactivated'=>true]),
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                json_encode(array('deactivated'=>true)),
+                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
             );
-            if (($res['success'] ?? false) && (int)$res['http_code']===200) {
+            if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction('deactivate '.$uid);
-                users_redirect_with_state(['success'=>'User deactivated']);
-            } else $error = http_fail_msg($res,'Failed to deactivate');
+                users_redirect_with_state(array('success'=>'User deactivated'));
+            } else {
+                $error = http_fail_msg($res,'Failed to deactivate');
+            }
         }
     }
 }
 
 // Reactivate
-if (($_POST['action'] ?? '') === 'reactivate_user') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) { $error='Invalid CSRF token'; }
-    else {
-        $uid = (string)($_POST['user_id'] ?? '');
+if (isset($_POST['action']) && $_POST['action'] === 'reactivate_user') {
+    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
+        $error='Invalid CSRF token';
+    } else {
+        $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
         if ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
-                json_encode(['deactivated'=>false]),
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                json_encode(array('deactivated'=>false)),
+                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
             );
-            if (($res['success'] ?? false) && (int)$res['http_code']===200) {
+            if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction('reactivate '.$uid);
-                users_redirect_with_state(['success'=>'User reactivated']);
-            } else $error = http_fail_msg($res,'Failed to reactivate');
+                users_redirect_with_state(array('success'=>'User reactivated'));
+            } else {
+                $error = http_fail_msg($res,'Failed to reactivate');
+            }
         }
     }
 }
 
 // Toggle admin
-if (($_POST['action'] ?? '') === 'toggle_admin') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) { $error='Invalid CSRF token'; }
-    else {
-        $uid  = (string)($_POST['user_id'] ?? '');
+if (isset($_POST['action']) && $_POST['action'] === 'toggle_admin') {
+    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
+        $error='Invalid CSRF token';
+    } else {
+        $uid  = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
         $make = !empty($_POST['make_admin']);
-        if (!$make && $uid === ($_SESSION['admin_user'] ?? '')) $error='Cannot remove your own admin privileges';
-        elseif ($uid !== '') {
+        if (!$make && $uid === (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')) {
+            $error='Cannot remove your own admin privileges';
+        } elseif ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
-                json_encode(['admin'=>$make]),
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                json_encode(array('admin'=>$make)),
+                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
             );
-            if (($res['success'] ?? false) && (int)$res['http_code']===200) {
+            if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction(($make?'grant':'revoke').' admin '.$uid);
-                users_redirect_with_state(['success'=>$make?'Admin granted':'Admin revoked']);
-            } else $error = http_fail_msg($res,'Failed to change admin');
+                users_redirect_with_state(array('success'=>$make?'Admin granted':'Admin revoked'));
+            } else {
+                $error = http_fail_msg($res,'Failed to change admin');
+            }
         }
     }
 }
 
 // Change password
-if (($_POST['action'] ?? '') === 'change_password') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) { $error='Invalid CSRF token'; }
-    else {
-        $uid = (string)($_POST['user_id'] ?? '');
-        $npw = (string)($_POST['new_password'] ?? '');
-        if (strlen($npw) < 6) $error='Password must be at least 6 characters';
-        elseif ($uid !== '') {
+if (isset($_POST['action']) && $_POST['action'] === 'change_password') {
+    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
+        $error='Invalid CSRF token';
+    } else {
+        $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
+        $npw = (string)(isset($_POST['new_password']) ? $_POST['new_password'] : '');
+        if (strlen($npw) < 6) {
+            $error='Password must be at least 6 characters';
+        } elseif ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v1/users/'.rawurlencode($uid).'/password',
                 'POST',
-                json_encode(['new_password'=>$npw]),
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                json_encode(array('new_password'=>$npw)),
+                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
             );
-            if (($res['success'] ?? false) && (int)$res['http_code']===200) {
+            if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction('change password '.$uid);
-                users_redirect_with_state(['success'=>'Password changed']);
-            } else $error = http_fail_msg($res,'Failed to change password');
+                users_redirect_with_state(array('success'=>'Password changed'));
+            } else {
+                $error = http_fail_msg($res,'Failed to change password');
+            }
         }
     }
 }
 
 /* ---------- fetch list ---------- */
-$page    = max(1, (int)($_GET['page_num'] ?? 1)); // не конфликтуем с router=page
-$perPage = in_array((int)($_GET['per_page'] ?? 50), [10,50,100], true) ? (int)($_GET['per_page']) : 50;
-$search  = trim((string)($_GET['search'] ?? ''));
+$page    = max(1, (int)(isset($_GET['page_num']) ? $_GET['page_num'] : 1)); // не конфликтуем с router=page
+$perPage = (int)(isset($_GET['per_page']) ? $_GET['per_page'] : 50);
+if (!in_array($perPage, array(10,50,100), true)) $perPage = 50;
+$search  = trim((string)(isset($_GET['search']) ? $_GET['search'] : ''));
 $showDeactivated = isset($_GET['show_deactivated']);
 
 $apiUrl = MATRIX_SERVER.'/_synapse/admin/v2/users?limit='.$perPage.'&from='.(($page-1)*$perPage);
 if ($search !== '')   $apiUrl .= '&name='.urlencode($search);
 if ($showDeactivated) $apiUrl .= '&deactivated=true';
 
-$listRes = makeMatrixRequest($apiUrl,'GET',null,['Authorization: Bearer '.$_SESSION['admin_token']]);
-$users = []; $total = 0;
-if (($listRes['success'] ?? false) && (int)$listRes['http_code']===200) {
-    $data  = json_decode($listRes['response'], true) ?: [];
-    $users = $data['users'] ?? [];
-    $total = (int)($data['total'] ?? count($users));
+$listRes = makeMatrixRequest($apiUrl,'GET',null,array('Authorization: Bearer '.$_SESSION['admin_token']));
+$users = array(); $total = 0;
+if (!empty($listRes['success']) && (int)$listRes['http_code']===200) {
+    $data = json_decode($listRes['response'], true);
+    if (!is_array($data)) $data = array();
+    // поддерживаем разные поля от разных версий Synapse
+    if (isset($data['users']) && is_array($data['users'])) {
+        $users = $data['users'];
+        $total = isset($data['total']) ? (int)$data['total'] : count($users);
+    } elseif (isset($data['results']) && is_array($data['results'])) {
+        $users = $data['results'];
+        $total = isset($data['count']) ? (int)$data['count'] : count($users);
+    } else {
+        // неожиданный ответ, покажем кусок для отладки
+        $error = 'Unexpected users payload';
+    }
 } else {
     $error = $error ?: http_fail_msg($listRes, 'Failed to load users list');
 }
-$totalPages = max(1, (int)ceil(max(1,$total) / $perPage));
+$totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
 ?>
 
 <?php if ($error): ?>
@@ -193,7 +224,7 @@ $totalPages = max(1, (int)ceil(max(1,$total) / $perPage));
   </form>
 </div>
 
-<!-- Search / filters -->
+<!-- Search / filters + list -->
 <div class="card">
   <h2>Users</h2>
   <form method="get" style="display:flex;gap:10px;margin:12px 0;align-items:center;">
@@ -216,7 +247,7 @@ $totalPages = max(1, (int)ceil(max(1,$total) / $perPage));
   </form>
 
   <div class="stats" style="opacity:.7;margin:6px 0;">
-    Showing <?= count($users) ?> of <?= $total ?> users <?= $search!=='' ? '(filtered)' : '' ?>
+    Showing <?= is_array($users)?count($users):0 ?> of <?= (int)$total ?> users <?= $search!=='' ? '(filtered)' : '' ?>
   </div>
 
   <table class="table">
@@ -234,21 +265,21 @@ $totalPages = max(1, (int)ceil(max(1,$total) / $perPage));
     <?php if (!$users): ?>
       <tr><td colspan="6" style="text-align:center;opacity:.7;padding:14px;">No users</td></tr>
     <?php else: foreach ($users as $u):
-        $uid     = (string)($u['name'] ?? '');
+        $uid     = isset($u['name']) ? (string)$u['name'] : (isset($u['user_id']) ? (string)$u['user_id'] : '');
         $isAdm   = !empty($u['admin']);
         $dead    = !empty($u['deactivated']);
         $created = !empty($u['creation_ts']) ? date('Y-m-d H:i', $u['creation_ts']/1000) : '—';
     ?>
       <tr>
         <td><?= htmlspecialchars($uid) ?></td>
-        <td><?= htmlspecialchars($u['displayname'] ?? 'N/A') ?></td>
+        <td><?= htmlspecialchars(isset($u['displayname']) ? $u['displayname'] : 'N/A') ?></td>
         <td><?= $isAdm ? '<span style="color:#00ff88">Admin</span>' : '<span style="color:#888">User</span>' ?></td>
         <td><?= $dead ? '<span style="color:#ff6666">Inactive</span>' : '<span style="color:#58A6FF">Active</span>' ?></td>
         <td><?= $created ?></td>
         <td>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
             <?php if (!$dead): ?>
-              <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
+              <?php if ($uid !== (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')): ?>
                 <form method="post" class="js-confirm-form" data-confirm="Deactivate this user?">
                   <input type="hidden" name="action" value="deactivate_user">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
@@ -278,7 +309,7 @@ $totalPages = max(1, (int)ceil(max(1,$total) / $perPage));
                 <button class="btn" type="submit">Make Admin</button>
               </form>
             <?php else: ?>
-              <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
+              <?php if ($uid !== (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')): ?>
                 <form method="post" class="js-confirm-form" data-confirm="Revoke admin from this user?">
                   <input type="hidden" name="action" value="toggle_admin">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
@@ -325,7 +356,7 @@ $totalPages = max(1, (int)ceil(max(1,$total) / $perPage));
   <?php endif; ?>
 </div>
 
-<!-- Password modal (как в rooms.php — без inline JS) -->
+<!-- Password modal -->
 <div id="pwdModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(24,26,32,.95);z-index:1000;">
   <div class="modal-content" style="background:#23272E;border:1px solid #30363D;border-radius:10px;max-width:480px;margin:10% auto;padding:20px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
