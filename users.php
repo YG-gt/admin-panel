@@ -1,5 +1,5 @@
 <?php
-// users.php — управление пользователями (как rooms.php)
+
 if (!function_exists('isLoggedIn')) { require __DIR__ . '/bootstrap.php'; }
 require_login();
 
@@ -185,7 +185,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'change_password') {
 }
 
 /* ---------- fetch list ---------- */
-$page    = max(1, (int)(isset($_GET['page_num']) ? $_GET['page_num'] : 1)); // не конфликтуем с router=page
+$page    = max(1, (int)(isset($_GET['page_num']) ? $_GET['page_num'] : 1)); 
 $perPage = (int)(isset($_GET['per_page']) ? $_GET['per_page'] : 50);
 if (!in_array($perPage, array(10,50,100), true)) $perPage = 50;
 $search  = trim((string)(isset($_GET['search']) ? $_GET['search'] : ''));
@@ -200,7 +200,7 @@ $users = array(); $total = 0;
 if (!empty($listRes['success']) && (int)$listRes['http_code']===200) {
     $data = json_decode($listRes['response'], true);
     if (!is_array($data)) $data = array();
-    // поддерживаем разные поля от разных версий Synapse
+
     if (isset($data['users']) && is_array($data['users'])) {
         $users = $data['users'];
         $total = isset($data['total']) ? (int)$data['total'] : count($users);
@@ -208,7 +208,6 @@ if (!empty($listRes['success']) && (int)$listRes['http_code']===200) {
         $users = $data['results'];
         $total = isset($data['count']) ? (int)$data['count'] : count($users);
     } else {
-        // неожиданный ответ, покажем кусок для отладки
         $error = 'Unexpected users payload';
     }
 } else {
@@ -303,7 +302,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                   <input type="hidden" name="action" value="deactivate_user">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                   <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                  <button class="btn" type="submit">Deactivate</button>
+                  <button class="btn btn-danger" type="submit">Deactivate</button>
                 </form>
               <?php else: ?>
                 <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Deactivate</span>
@@ -313,11 +312,11 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                 <input type="hidden" name="action" value="reactivate_user">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                 <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                <button class="btn" type="submit">Reactivate</button>
+                <button class="btn btn-warning" type="submit">Reactivate</button>
               </form>
             <?php endif; ?>
 
-            <button class="btn js-open-pwd" type="button" data-uid="<?= htmlspecialchars($uid, ENT_QUOTES) ?>">Change Password</button>
+            <button class="btn btn-info js-open-pwd" type="button" data-uid="<?= htmlspecialchars($uid, ENT_QUOTES) ?>">Change Password</button>
 
             <?php if (!$isAdm): ?>
               <form method="post" class="js-confirm-form" data-confirm="Grant admin to this user?">
@@ -325,7 +324,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                 <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
                 <input type="hidden" name="make_admin" value="1">
-                <button class="btn" type="submit">Make Admin</button>
+                <button class="btn btn-warning" type="submit">Make Admin</button>
               </form>
             <?php else: ?>
               <?php if ($uid !== (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')): ?>
@@ -333,7 +332,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                   <input type="hidden" name="action" value="toggle_admin">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                   <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                  <button class="btn" type="submit">Remove Admin</button>
+                  <button class="btn btn-danger" type="submit">Remove Admin</button>
                 </form>
               <?php else: ?>
                 <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;">Remove Admin</span>
@@ -345,34 +344,6 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
     <?php endforeach; endif; ?>
     </tbody>
   </table>
-
-  <?php if ($totalPages > 1): ?>
-    <div class="pagination" style="display:flex;gap:8px;justify-content:center;margin-top:14px;">
-      <?php
-        $base = 'index.php?page=users'
-              . '&per_page='.$perPage
-              . '&search='.urlencode($search)
-              . ($showDeactivated?'&show_deactivated=1':'');
-        $start = max(1, $page-2);
-        $end   = min($totalPages, $page+2);
-      ?>
-      <?php if ($page > 1): ?>
-        <a class="btn" href="<?= $base.'&page_num=1' ?>">First</a>
-        <a class="btn" href="<?= $base.'&page_num='.($page-1) ?>">Prev</a>
-      <?php endif; ?>
-      <?php for ($i=$start;$i<=$end;$i++): ?>
-        <?php if ($i==$page): ?>
-          <span class="btn" style="background:#2a3038;cursor:default;"><?= $i ?></span>
-        <?php else: ?>
-          <a class="btn" href="<?= $base.'&page_num='.$i ?>"><?= $i ?></a>
-        <?php endif; ?>
-      <?php endfor; ?>
-      <?php if ($page < $totalPages): ?>
-        <a class="btn" href="<?= $base.'&page_num='.($page+1) ?>">Next</a>
-        <a class="btn" href="<?= $base.'&page_num='.$totalPages ?>">Last</a>
-      <?php endif; ?>
-    </div>
-  <?php endif; ?>
 </div>
 
 <!-- Password modal -->
@@ -393,7 +364,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                style="width:100%;padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
       </div>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
-        <button class="btn" type="submit">Change</button>
+        <button class="btn btn-info" type="submit">Change</button>
         <button class="btn js-close-pwd" type="button" style="background:#666;">Cancel</button>
       </div>
     </form>
