@@ -56,7 +56,7 @@ if (($_POST['action'] ?? '') === 'create_user') {
                 $payloadArr['displayname'] = $displayname;
             }
             if ($userType !== '') {
-                $payloadArr['user_type'] = $userType;
+                $payloadArr['user_type'] = $userType; // '', 'moderator', 'teamlead'
             }
 
             $res = makeMatrixRequest(
@@ -77,22 +77,22 @@ if (($_POST['action'] ?? '') === 'create_user') {
 
 // Deactivate
 if (isset($_POST['action']) && $_POST['action'] === 'deactivate_user') {
-    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error='Invalid CSRF token';
     } else {
-        $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
-        if ($uid === (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')) {
+        $uid = (string)($_POST['user_id'] ?? '');
+        if ($uid === ($_SESSION['admin_user'] ?? '')) {
             $error='Cannot deactivate yourself';
         } elseif ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
-                json_encode(array('deactivated'=>true)),
-                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
+                json_encode(['deactivated'=>true]),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
             if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction('deactivate '.$uid);
-                users_redirect_with_state(array('success'=>'User deactivated'));
+                users_redirect_with_state(['success'=>'User deactivated']);
             } else {
                 $error = http_fail_msg($res,'Failed to deactivate');
             }
@@ -102,20 +102,20 @@ if (isset($_POST['action']) && $_POST['action'] === 'deactivate_user') {
 
 // Reactivate
 if (isset($_POST['action']) && $_POST['action'] === 'reactivate_user') {
-    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error='Invalid CSRF token';
     } else {
-        $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
+        $uid = (string)($_POST['user_id'] ?? '');
         if ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
-                json_encode(array('deactivated'=>false)),
-                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
+                json_encode(['deactivated'=>false]),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
             if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction('reactivate '.$uid);
-                users_redirect_with_state(array('success'=>'User reactivated'));
+                users_redirect_with_state(['success'=>'User reactivated']);
             } else {
                 $error = http_fail_msg($res,'Failed to reactivate');
             }
@@ -125,23 +125,23 @@ if (isset($_POST['action']) && $_POST['action'] === 'reactivate_user') {
 
 // Toggle admin
 if (isset($_POST['action']) && $_POST['action'] === 'toggle_admin') {
-    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error='Invalid CSRF token';
     } else {
-        $uid  = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
+        $uid  = (string)($_POST['user_id'] ?? '');
         $make = !empty($_POST['make_admin']);
-        if (!$make && $uid === (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')) {
+        if (!$make && $uid === ($_SESSION['admin_user'] ?? '')) {
             $error='Cannot remove your own admin privileges';
         } elseif ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
-                json_encode(array('admin'=>$make)),
-                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
+                json_encode(['admin'=>$make]),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
             if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction(($make?'grant':'revoke').' admin '.$uid);
-                users_redirect_with_state(array('success'=>$make?'Admin granted':'Admin revoked'));
+                users_redirect_with_state(['success'=>$make?'Admin granted':'Admin revoked']);
             } else {
                 $error = http_fail_msg($res,'Failed to change admin');
             }
@@ -149,46 +149,71 @@ if (isset($_POST['action']) && $_POST['action'] === 'toggle_admin') {
     }
 }
 
-// Change password
 // Change password (v2 preferred, fallback to v1)
 if (isset($_POST['action']) && $_POST['action'] === 'change_password') {
-    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
     } else {
-        $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
-        $npw = (string)(isset($_POST['new_password']) ? $_POST['new_password'] : '');
+        $uid = (string)($_POST['user_id'] ?? '');
+        $npw = (string)($_POST['new_password'] ?? '');
         if (strlen($npw) < 6) {
             $error = 'Password must be at least 6 characters';
         } elseif ($uid !== '') {
 
-            // 1) v2 modify user
-            $payloadV2 = json_encode(array('password' => $npw, 'logout_devices' => true));
+            // v2
+            $payloadV2 = json_encode(['password' => $npw, 'logout_devices' => true]);
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
                 $payloadV2,
-                array('Content-Type: application/json', 'Authorization: Bearer '.$_SESSION['admin_token'])
+                ['Content-Type: application/json', 'Authorization: Bearer '.$_SESSION['admin_token']]
             );
 
             $ok = !empty($res['success']) && (int)$res['http_code'] === 200;
 
-            // 2) fallback: v1 reset_password (old API)
-            if (!$ok && in_array((int)$res['http_code'], array(404,405,501), true)) {
-                $payloadV1 = json_encode(array('new_password' => $npw, 'logout_devices' => true));
+            // fallback v1
+            if (!$ok && in_array((int)$res['http_code'], [404,405,501], true)) {
+                $payloadV1 = json_encode(['new_password' => $npw, 'logout_devices' => true]);
                 $res = makeMatrixRequest(
                     MATRIX_SERVER.'/_synapse/admin/v1/reset_password/'.rawurlencode($uid),
                     'POST',
                     $payloadV1,
-                    array('Content-Type: application/json', 'Authorization: Bearer '.$_SESSION['admin_token'])
+                    ['Content-Type: application/json', 'Authorization: Bearer '.$_SESSION['admin_token']]
                 );
                 $ok = !empty($res['success']) && (int)$res['http_code'] === 200;
             }
 
             if ($ok) {
                 logAction('change password '.$uid);
-                users_redirect_with_state(array('success' => 'Password changed'));
+                users_redirect_with_state(['success' => 'Password changed']);
             } else {
                 $error = http_fail_msg($res, 'Failed to change password');
+            }
+        }
+    }
+}
+
+// NEW: change user type
+if (isset($_POST['action']) && $_POST['action'] === 'change_user_type') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid CSRF token';
+    } else {
+        $uid = (string)($_POST['user_id'] ?? '');
+        $new = trim((string)($_POST['new_user_type'] ?? '')); // '' | 'moderator' | 'teamlead'
+        if ($uid !== '') {
+            // нормализуем: '' -> null
+            $payload = ['user_type' => ($new === '' ? null : $new)];
+            $res = makeMatrixRequest(
+                MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
+                'PUT',
+                json_encode($payload),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+            );
+            if (!empty($res['success']) && (int)$res['http_code']===200) {
+                logAction('change user_type '.$uid.' -> '.($new===''?'(default)':$new));
+                users_redirect_with_state(['success'=>'User type updated']);
+            } else {
+                $error = http_fail_msg($res, 'Failed to update user type');
             }
         }
     }
@@ -232,10 +257,10 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
 
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;">
-      <input class="input" name="new_username" placeholder="username (without @domain)" required>
-      <input class="input" type="password" name="new_password" placeholder="password" required>
-      <input class="input" name="displayname" placeholder="display name">
-      <select class="input" name="user_type">
+      <input class="input input-sm" name="new_username" placeholder="username (without @domain)" required>
+      <input class="input input-sm" type="password" name="new_password" placeholder="password" required>
+      <input class="input input-sm" name="displayname" placeholder="display name">
+      <select class="input input-sm" name="user_type" title="User type">
         <option value="">User</option>
         <option value="moderator">Moderator</option>
         <option value="teamlead">Team Lead</option>
@@ -256,8 +281,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
   <h2>Users</h2>
   <form method="get" style="display:flex;gap:10px;margin:12px 0;align-items:center;">
     <input type="hidden" name="page" value="users">
-    <input class="input" name="search" placeholder="Search users…" value="<?= htmlspecialchars($search) ?>"
-           style="flex:1;">
+    <input class="input" name="search" placeholder="Search users…" value="<?= htmlspecialchars($search) ?>" style="flex:1;">
     <select class="input" name="per_page">
       <option value="10"  <?= $perPage===10?'selected':'' ?>>10</option>
       <option value="50"  <?= $perPage===50?'selected':'' ?>>50</option>
@@ -295,32 +319,29 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
         $isAdm   = !empty($u['admin']);
         $dead    = !empty($u['deactivated']);
         $created = !empty($u['creation_ts']) ? date('Y-m-d H:i', $u['creation_ts']/1000) : '—';
+        $userTypeVal = $u['user_type'] ?? '';
 
-        // Type column
+        // Type label for display column
         if ($isAdm) {
-            $type = '<span style="color:#00ff88">Admin</span>';
-        } elseif (!empty($u['user_type'])) {
-            if ($u['user_type'] === 'moderator') {
-                $type = '<span style="color:#FFA500">Moderator</span>';
-            } elseif ($u['user_type'] === 'teamlead') {
-                $type = '<span style="color:#58A6FF">Team Lead</span>';
-            } else {
-                $type = htmlspecialchars(ucfirst($u['user_type']));
-            }
+            $typeLabel = '<span style="color:#00ff88">Admin</span>';
+        } elseif ($userTypeVal === 'moderator') {
+            $typeLabel = '<span style="color:#FFA500">Moderator</span>';
+        } elseif ($userTypeVal === 'teamlead') {
+            $typeLabel = '<span style="color:#58A6FF">Team Lead</span>';
         } else {
-            $type = '<span style="color:#888">User</span>';
+            $typeLabel = '<span style="color:#888">User</span>';
         }
     ?>
       <tr>
         <td><?= htmlspecialchars($uid) ?></td>
         <td><?= htmlspecialchars($u['displayname'] ?? 'N/A') ?></td>
-        <td><?= $type ?></td>
+        <td><?= $typeLabel ?></td>
         <td><?= $dead ? '<span style="color:#ff6666">Inactive</span>' : '<span style="color:#58A6FF">Active</span>' ?></td>
         <td><?= $created ?></td>
         <td>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
             <?php if (!$dead): ?>
-              <?php if ($uid !== (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')): ?>
+              <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
                 <form method="post" class="js-confirm-form" data-confirm="Deactivate this user?">
                   <input type="hidden" name="action" value="deactivate_user">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
@@ -350,7 +371,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                 <button class="btn btn-warning btn-sm" type="submit">Make Admin</button>
               </form>
             <?php else: ?>
-              <?php if ($uid !== (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')): ?>
+              <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
                 <form method="post" class="js-confirm-form" data-confirm="Revoke admin from this user?">
                   <input type="hidden" name="action" value="toggle_admin">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
@@ -361,6 +382,20 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                 <span class="btn btn-sm" style="background:#555;cursor:not-allowed;opacity:.6;">Remove Admin</span>
               <?php endif; ?>
             <?php endif; ?>
+
+            <!-- New: inline change user type -->
+            <form method="post" style="display:flex;gap:6px;align-items:center;">
+              <input type="hidden" name="action" value="change_user_type">
+              <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+              <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
+              <select name="new_user_type" class="input input-sm" title="Change user type">
+                <option value=""         <?= $userTypeVal==='' ? 'selected' : '' ?>>User</option>
+                <option value="moderator"<?= $userTypeVal==='moderator' ? 'selected' : '' ?>>Moderator</option>
+                <option value="teamlead" <?= $userTypeVal==='teamlead'  ? 'selected' : '' ?>>Team Lead</option>
+              </select>
+              <button class="btn btn-sm" type="submit">Set Type</button>
+            </form>
+
           </div>
         </td>
       </tr>
@@ -374,7 +409,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
   <div class="modal-content" style="background:#23272E;border:1px solid #30363D;border-radius:10px;max-width:480px;margin:10% auto;padding:20px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3>Change Password</h3>
-      <button class="btn js-close-pwd" type="button">✕</button>
+      <button class="btn js-close-pwd btn-sm" type="button">✕</button>
     </div>
     <form method="post" id="pwdForm" style="margin-top:10px;">
       <input type="hidden" name="action" value="change_password">
@@ -384,7 +419,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
         <label>New password</label>
         <input type="password" name="new_password" id="pwdNew"
                placeholder="Minimum 6 characters" required minlength="6"
-               style="width:100%;padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+               class="input input-sm" style="width:100%;">
       </div>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
         <button class="btn btn-info btn-sm" type="submit">Change</button>
