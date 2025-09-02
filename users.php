@@ -1,5 +1,5 @@
 <?php
-// users.php — Users section
+
 if (!function_exists('isLoggedIn')) { require __DIR__ . '/bootstrap.php'; }
 require_login();
 
@@ -15,33 +15,31 @@ function users_redirect_with_state($extra = []) {
         'search'           => $_GET['search'] ?? '',
         'show_deactivated' => isset($_GET['show_deactivated']) ? '1' : null,
     ];
-    foreach ($extra as $k=>$v) { $params[$k] = $v; }
-    // remove nulls
-    $clean = [];
-    foreach ($params as $k=>$v) if ($v !== null) $clean[$k] = $v;
-    header('Location: index.php?'.http_build_query($clean));
+    foreach ($extra as $k => $v) { $params[$k] = $v; }
+    $params = array_filter($params, fn($v) => $v !== null);
+    header('Location: index.php?' . http_build_query($params));
     exit;
 }
 
 function http_fail_msg($res, $fallback) {
-    $code = (int)($res['http_code'] ?? 0);
-    $body = (string)($res['response'] ?? ($res['error'] ?? ''));
-    if ($body !== '') $body = mb_substr($body, 0, 300);
+    $code = $res['http_code'] ?? 0;
+    $body = $res['response'] ?? ($res['error'] ?? '');
+    if ($body !== '') { $body = substr($body, 0, 300); }
     $tail = ($code ? 'HTTP '.$code : '') . ($body !== '' ? ' / '.$body : '');
     return $fallback . ($tail ? ' — '.$tail : '');
 }
 
 /* ---------- actions ---------- */
-// Create
+// Create user
 if (($_POST['action'] ?? '') === 'create_user') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
     } else {
         $u = trim($_POST['new_username'] ?? '');
-        $p = (string)($_POST['new_password'] ?? '');
-        $dname = trim($_POST['display_name'] ?? '');
-        $uType = $_POST['user_type'] ?? 'user'; // user|moderator|teamlead
+        $p = $_POST['new_password'] ?? '';
         $isAdmin = !empty($_POST['is_admin']);
+        $displayname = trim($_POST['displayname'] ?? '');
+        $userType = trim($_POST['user_type'] ?? '');
 
         if ($u === '' || $p === '') {
             $error = 'Please enter username and password';
@@ -50,26 +48,25 @@ if (($_POST['action'] ?? '') === 'create_user') {
         } elseif (strlen($p) < 6) {
             $error = 'Password must be at least 6 characters';
         } else {
-            // v2 create (password, admin, displayname, user_type)
-            $payload = [
-                'password'    => $p,
-                'admin'       => $isAdmin,
+            $payloadArr = [
+                'password' => $p,
+                'admin'    => $isAdmin,
             ];
-            if ($dname !== '') $payload['displayname'] = $dname;
-  
-            if (in_array($uType, ['moderator','teamlead'], true)) {
-                $payload['user_type'] = $uType;
+            if ($displayname !== '') {
+                $payloadArr['displayname'] = $displayname;
+            }
+            if ($userType !== '') {
+                $payloadArr['user_type'] = $userType;
             }
 
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/@'.$u.':'.MATRIX_DOMAIN,
                 'PUT',
-                json_encode($payload),
+                json_encode($payloadArr),
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-
             if (!empty($res['success']) && in_array((int)$res['http_code'], [200,201], true)) {
-                logAction('create user @'.$u.':'.MATRIX_DOMAIN.($isAdmin?' (admin)':'').($dname!==''?' dname="'.$dname.'"':'').(isset($payload['user_type'])?' type='.$payload['user_type']:''));
+                logAction('create user @'.$u.':'.MATRIX_DOMAIN.($isAdmin?' (admin)':'').($userType ? ' ('.$userType.')' : ''));
                 users_redirect_with_state(['success'=>'User created']);
             } else {
                 $error = http_fail_msg($res, 'Failed to create user');
@@ -79,23 +76,23 @@ if (($_POST['action'] ?? '') === 'create_user') {
 }
 
 // Deactivate
-if (($_POST['action'] ?? '') === 'deactivate_user') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+if (isset($_POST['action']) && $_POST['action'] === 'deactivate_user') {
+    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
         $error='Invalid CSRF token';
     } else {
-        $uid = (string)($_POST['user_id'] ?? '');
-        if ($uid === ($_SESSION['admin_user'] ?? '')) {
+        $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
+        if ($uid === (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')) {
             $error='Cannot deactivate yourself';
         } elseif ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
-                json_encode(['deactivated'=>true]),
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                json_encode(array('deactivated'=>true)),
+                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
             );
             if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction('deactivate '.$uid);
-                users_redirect_with_state(['success'=>'User deactivated']);
+                users_redirect_with_state(array('success'=>'User deactivated'));
             } else {
                 $error = http_fail_msg($res,'Failed to deactivate');
             }
@@ -104,21 +101,21 @@ if (($_POST['action'] ?? '') === 'deactivate_user') {
 }
 
 // Reactivate
-if (($_POST['action'] ?? '') === 'reactivate_user') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+if (isset($_POST['action']) && $_POST['action'] === 'reactivate_user') {
+    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
         $error='Invalid CSRF token';
     } else {
-        $uid = (string)($_POST['user_id'] ?? '');
+        $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
         if ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
-                json_encode(['deactivated'=>false]),
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                json_encode(array('deactivated'=>false)),
+                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
             );
             if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction('reactivate '.$uid);
-                users_redirect_with_state(['success'=>'User reactivated']);
+                users_redirect_with_state(array('success'=>'User reactivated'));
             } else {
                 $error = http_fail_msg($res,'Failed to reactivate');
             }
@@ -127,24 +124,24 @@ if (($_POST['action'] ?? '') === 'reactivate_user') {
 }
 
 // Toggle admin
-if (($_POST['action'] ?? '') === 'toggle_admin') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+if (isset($_POST['action']) && $_POST['action'] === 'toggle_admin') {
+    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
         $error='Invalid CSRF token';
     } else {
-        $uid  = (string)($_POST['user_id'] ?? '');
+        $uid  = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
         $make = !empty($_POST['make_admin']);
-        if (!$make && $uid === ($_SESSION['admin_user'] ?? '')) {
+        if (!$make && $uid === (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')) {
             $error='Cannot remove your own admin privileges';
         } elseif ($uid !== '') {
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
-                json_encode(['admin'=>$make]),
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                json_encode(array('admin'=>$make)),
+                array('Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token'])
             );
             if (!empty($res['success']) && (int)$res['http_code']===200) {
                 logAction(($make?'grant':'revoke').' admin '.$uid);
-                users_redirect_with_state(['success'=>$make?'Admin granted':'Admin revoked']);
+                users_redirect_with_state(array('success'=>$make?'Admin granted':'Admin revoked'));
             } else {
                 $error = http_fail_msg($res,'Failed to change admin');
             }
@@ -152,41 +149,44 @@ if (($_POST['action'] ?? '') === 'toggle_admin') {
     }
 }
 
-// Change password (v2 preferred, fallback v1 reset_password)
-if (($_POST['action'] ?? '') === 'change_password') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+// Change password
+// Change password (v2 preferred, fallback to v1)
+if (isset($_POST['action']) && $_POST['action'] === 'change_password') {
+    if (!verifyCsrf(isset($_POST['csrf_token']) ? $_POST['csrf_token'] : '')) {
         $error = 'Invalid CSRF token';
     } else {
-        $uid = (string)($_POST['user_id'] ?? '');
-        $npw = (string)($_POST['new_password'] ?? '');
+        $uid = (string)(isset($_POST['user_id']) ? $_POST['user_id'] : '');
+        $npw = (string)(isset($_POST['new_password']) ? $_POST['new_password'] : '');
         if (strlen($npw) < 6) {
             $error = 'Password must be at least 6 characters';
         } elseif ($uid !== '') {
-            // v2 modify
-            $payloadV2 = json_encode(['password'=>$npw, 'logout_devices'=>true]);
+
+            // 1) v2 modify user
+            $payloadV2 = json_encode(array('password' => $npw, 'logout_devices' => true));
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
                 'PUT',
                 $payloadV2,
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                array('Content-Type: application/json', 'Authorization: Bearer '.$_SESSION['admin_token'])
             );
-            $ok = !empty($res['success']) && (int)$res['http_code']===200;
 
-            // fallback v1 reset_password
-            if (!$ok && in_array((int)($res['http_code'] ?? 0), [404,405,501], true)) {
-                $payloadV1 = json_encode(['new_password'=>$npw, 'logout_devices'=>true]);
+            $ok = !empty($res['success']) && (int)$res['http_code'] === 200;
+
+            // 2) fallback: v1 reset_password (old API)
+            if (!$ok && in_array((int)$res['http_code'], array(404,405,501), true)) {
+                $payloadV1 = json_encode(array('new_password' => $npw, 'logout_devices' => true));
                 $res = makeMatrixRequest(
                     MATRIX_SERVER.'/_synapse/admin/v1/reset_password/'.rawurlencode($uid),
                     'POST',
                     $payloadV1,
-                    ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+                    array('Content-Type: application/json', 'Authorization: Bearer '.$_SESSION['admin_token'])
                 );
-                $ok = !empty($res['success']) && (int)$res['http_code']===200;
+                $ok = !empty($res['success']) && (int)$res['http_code'] === 200;
             }
 
             if ($ok) {
                 logAction('change password '.$uid);
-                users_redirect_with_state(['success'=>'Password changed']);
+                users_redirect_with_state(array('success' => 'Password changed'));
             } else {
                 $error = http_fail_msg($res, 'Failed to change password');
             }
@@ -194,52 +194,11 @@ if (($_POST['action'] ?? '') === 'change_password') {
     }
 }
 
-// DELETE (full erase)
-if (($_POST['action'] ?? '') === 'delete_user') {
-    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
-        $error = 'Invalid CSRF token';
-    } else {
-        $uid = trim((string)($_POST['user_id'] ?? ''));
-        if ($uid === '' ) {
-            $error = 'User ID is required';
-        } elseif ($uid === ($_SESSION['admin_user'] ?? '')) {
-            $error = 'You cannot delete yourself';
-        } else {
-            // 1) Try v1 deactivate with erase=true (GDPR full delete)
-            $res = makeMatrixRequest(
-                MATRIX_SERVER.'/_synapse/admin/v1/deactivate/'.rawurlencode($uid),
-                'POST',
-                json_encode(['erase'=>true]),
-                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
-            );
-            $ok = !empty($res['success']) && (int)$res['http_code']===200;
-
-            // 2) Fallback: v2 DELETE
-            if (!$ok) {
-                $res = makeMatrixRequest(
-                    MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
-                    'DELETE',
-                    null,
-                    ['Authorization: Bearer '.$_SESSION['admin_token']]
-                );
-                $ok = !empty($res['success']) && in_array((int)$res['http_code'], [200,204], true);
-            }
-
-            if ($ok) {
-                logAction('erase/delete user '.$uid);
-                users_redirect_with_state(['success'=>'User deleted']);
-            } else {
-                $error = http_fail_msg($res, 'Failed to delete user');
-            }
-        }
-    }
-}
-
 /* ---------- fetch list ---------- */
-$page    = max(1, (int)($_GET['page_num'] ?? 1));
+$page    = max(1, (int)($_GET['page_num'] ?? 1)); 
 $perPage = (int)($_GET['per_page'] ?? 50);
 if (!in_array($perPage, [10,50,100], true)) $perPage = 50;
-$search  = trim((string)($_GET['search'] ?? ''));
+$search  = trim($_GET['search'] ?? '');
 $showDeactivated = isset($_GET['show_deactivated']);
 
 $apiUrl = MATRIX_SERVER.'/_synapse/admin/v2/users?limit='.$perPage.'&from='.(($page-1)*$perPage);
@@ -250,15 +209,8 @@ $listRes = makeMatrixRequest($apiUrl,'GET',null,['Authorization: Bearer '.$_SESS
 $users = []; $total = 0;
 if (!empty($listRes['success']) && (int)$listRes['http_code']===200) {
     $data = json_decode($listRes['response'], true) ?: [];
-    if (isset($data['users']) && is_array($data['users'])) {
-        $users = $data['users'];
-        $total = (int)($data['total'] ?? count($users));
-    } elseif (isset($data['results']) && is_array($data['results'])) {
-        $users = $data['results'];
-        $total = (int)($data['count'] ?? count($users));
-    } else {
-        $error = $error ?: 'Unexpected users payload';
-    }
+    $users = $data['users'] ?? [];
+    $total = (int)($data['total'] ?? count($users));
 } else {
     $error = $error ?: http_fail_msg($listRes, 'Failed to load users list');
 }
@@ -272,61 +224,41 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
   <div class="card alert alert-success"><?= htmlspecialchars($success) ?></div>
 <?php endif; ?>
 
-<!-- Create / Delete cards -->
+<!-- Create user -->
 <div class="card">
   <h2>Create New User</h2>
-  <form method="post" style="margin-top:10px; display:grid; grid-template-columns: 1fr 1fr 1fr 200px auto; gap:10px; align-items:center;">
+  <form method="post" style="margin-top:10px;">
     <input type="hidden" name="action" value="create_user">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
 
-    <input class="input" name="new_username" placeholder="username (without @domain)" required
-           style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;">
+      <input class="input" name="new_username" placeholder="username (without @domain)" required>
+      <input class="input" type="password" name="new_password" placeholder="password" required>
+      <input class="input" name="displayname" placeholder="display name">
+      <select class="input" name="user_type">
+        <option value="">User</option>
+        <option value="moderator">Moderator</option>
+        <option value="teamlead">Team Lead</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" name="is_admin"> Admin
+      </label>
+    </div>
 
-    <input class="input" type="password" name="new_password" placeholder="password" required
-           style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-
-    <input class="input" name="display_name" placeholder="display name (optional)"
-           style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-
-    <select class="input" name="user_type"
-            style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-      <option value="user" selected>User</option>
-      <option value="moderator">Moderator</option>
-      <option value="teamlead">Team Lead</option>
-    </select>
-
-    <label style="display:flex;align-items:center;gap:8px;">
-      <input type="checkbox" name="is_admin"> Admin
-    </label>
-
-    <div style="grid-column: 1/-1; margin-top:4px;">
-      <button class="btn" type="submit">Create</button>
+    <div style="margin-top:10px;">
+      <button class="btn btn-sm" type="submit">Create</button>
     </div>
   </form>
 </div>
 
-<div class="card">
-  <h2>Delete User (irreversible)</h2>
-  <form method="post" class="js-confirm-form" data-confirm="Permanently delete this user? This cannot be undone.">
-    <input type="hidden" name="action" value="delete_user">
-    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
-    <div style="display:grid; grid-template-columns: 1fr auto; gap:10px;">
-      <input class="input" name="user_id" placeholder="@user:<?= htmlspecialchars(MATRIX_DOMAIN) ?>" required
-             style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-      <button class="btn" type="submit" style="background:linear-gradient(45deg,#ff4444,#cc0000);">Delete</button>
-    </div>
-  </form>
-</div>
-
-<!-- Search / filters + list -->
+<!-- Users list -->
 <div class="card">
   <h2>Users</h2>
   <form method="get" style="display:flex;gap:10px;margin:12px 0;align-items:center;">
     <input type="hidden" name="page" value="users">
     <input class="input" name="search" placeholder="Search users…" value="<?= htmlspecialchars($search) ?>"
-           style="flex:1;padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-    <select class="input" name="per_page"
-            style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+           style="flex:1;">
+    <select class="input" name="per_page">
       <option value="10"  <?= $perPage===10?'selected':'' ?>>10</option>
       <option value="50"  <?= $perPage===50?'selected':'' ?>>50</option>
       <option value="100" <?= $perPage===100?'selected':'' ?>>100</option>
@@ -341,7 +273,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
   </form>
 
   <div class="stats" style="opacity:.7;margin:6px 0;">
-    Showing <?= is_array($users)?count($users):0 ?> of <?= (int)$total ?> users <?= $search!=='' ? '(filtered)' : '' ?>
+    Showing <?= count($users) ?> of <?= $total ?> users <?= $search!=='' ? '(filtered)' : '' ?>
   </div>
 
   <table class="table">
@@ -363,44 +295,51 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
         $isAdm   = !empty($u['admin']);
         $dead    = !empty($u['deactivated']);
         $created = !empty($u['creation_ts']) ? date('Y-m-d H:i', $u['creation_ts']/1000) : '—';
-        // user_type may be null or one of our extras
-        $uType   = $u['user_type'] ?? null;
-        $typeLabel = $isAdm ? 'Admin'
-                    : (($uType === 'moderator') ? 'Moderator'
-                    : (($uType === 'teamlead') ? 'Team Lead' : 'User'));
+
+        // Type column
+        if ($isAdm) {
+            $type = '<span style="color:#00ff88">Admin</span>';
+        } elseif (!empty($u['user_type'])) {
+            if ($u['user_type'] === 'moderator') {
+                $type = '<span style="color:#FFA500">Moderator</span>';
+            } elseif ($u['user_type'] === 'teamlead') {
+                $type = '<span style="color:#58A6FF">Team Lead</span>';
+            } else {
+                $type = htmlspecialchars(ucfirst($u['user_type']));
+            }
+        } else {
+            $type = '<span style="color:#888">User</span>';
+        }
     ?>
       <tr>
         <td><?= htmlspecialchars($uid) ?></td>
         <td><?= htmlspecialchars($u['displayname'] ?? 'N/A') ?></td>
-        <td><?= htmlspecialchars($typeLabel) ?></td>
+        <td><?= $type ?></td>
         <td><?= $dead ? '<span style="color:#ff6666">Inactive</span>' : '<span style="color:#58A6FF">Active</span>' ?></td>
         <td><?= $created ?></td>
         <td>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
             <?php if (!$dead): ?>
-              <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
+              <?php if ($uid !== (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')): ?>
                 <form method="post" class="js-confirm-form" data-confirm="Deactivate this user?">
                   <input type="hidden" name="action" value="deactivate_user">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                   <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                  <button class="btn" type="submit" style="padding:6px 10px;font-size:12px;background:linear-gradient(45deg,#ff8a65,#ff7043);">Deactivate</button>
+                  <button class="btn btn-danger btn-sm" type="submit">Deactivate</button>
                 </form>
               <?php else: ?>
-                <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;padding:6px 10px;font-size:12px;">Deactivate</span>
+                <span class="btn btn-sm" style="background:#555;cursor:not-allowed;opacity:.6;">Deactivate</span>
               <?php endif; ?>
             <?php else: ?>
               <form method="post" class="js-confirm-form" data-confirm="Reactivate this user?">
                 <input type="hidden" name="action" value="reactivate_user">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                 <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                <button class="btn" type="submit" style="padding:6px 10px;font-size:12px;background:linear-gradient(45deg,#ffd54f,#ffb300);color:#000;">Reactivate</button>
+                <button class="btn btn-warning btn-sm" type="submit">Reactivate</button>
               </form>
             <?php endif; ?>
 
-            <button class="btn js-open-pwd" type="button" data-uid="<?= htmlspecialchars($uid, ENT_QUOTES) ?>"
-                    style="padding:6px 10px;font-size:12px;background:linear-gradient(45deg,#64b5f6,#1e88e5);">
-              Change Password
-            </button>
+            <button class="btn btn-info btn-sm js-open-pwd" type="button" data-uid="<?= htmlspecialchars($uid, ENT_QUOTES) ?>">Change Password</button>
 
             <?php if (!$isAdm): ?>
               <form method="post" class="js-confirm-form" data-confirm="Grant admin to this user?">
@@ -408,28 +347,19 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                 <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
                 <input type="hidden" name="make_admin" value="1">
-                <button class="btn" type="submit" style="padding:6px 10px;font-size:12px;background:linear-gradient(45deg,#ffd54f,#ffb300);color:#000;">Make Admin</button>
+                <button class="btn btn-warning btn-sm" type="submit">Make Admin</button>
               </form>
             <?php else: ?>
-              <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
+              <?php if ($uid !== (isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '')): ?>
                 <form method="post" class="js-confirm-form" data-confirm="Revoke admin from this user?">
                   <input type="hidden" name="action" value="toggle_admin">
                   <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                   <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                  <button class="btn" type="submit" style="padding:6px 10px;font-size:12px;background:linear-gradient(45deg,#ffa726,#fb8c00);">Remove Admin</button>
+                  <button class="btn btn-danger btn-sm" type="submit">Remove Admin</button>
                 </form>
               <?php else: ?>
-                <span class="btn" style="background:#555;cursor:not-allowed;opacity:.6;padding:6px 10px;font-size:12px;">Remove Admin</span>
+                <span class="btn btn-sm" style="background:#555;cursor:not-allowed;opacity:.6;">Remove Admin</span>
               <?php endif; ?>
-            <?php endif; ?>
-
-            <?php if ($uid !== ($_SESSION['admin_user'] ?? '')): ?>
-              <form method="post" class="js-confirm-form" data-confirm="PERMANENTLY delete this user? This cannot be undone.">
-                <input type="hidden" name="action" value="delete_user">
-                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
-                <input type="hidden" name="user_id" value="<?= htmlspecialchars($uid) ?>">
-                <button class="btn" type="submit" style="padding:6px 10px;font-size:12px;background:linear-gradient(45deg,#ff4444,#cc0000);">Delete</button>
-              </form>
             <?php endif; ?>
           </div>
         </td>
@@ -437,34 +367,6 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
     <?php endforeach; endif; ?>
     </tbody>
   </table>
-
-  <?php if ($totalPages > 1): ?>
-    <div class="pagination" style="display:flex;gap:8px;justify-content:center;margin-top:14px;">
-      <?php
-        $base = 'index.php?page=users'
-              . '&per_page='.$perPage
-              . '&search='.urlencode($search)
-              . ($showDeactivated?'&show_deactivated=1':'');
-        $start = max(1, $page-2);
-        $end   = min($totalPages, $page+2);
-      ?>
-      <?php if ($page > 1): ?>
-        <a class="btn" href="<?= $base.'&page_num=1' ?>">First</a>
-        <a class="btn" href="<?= $base.'&page_num='.($page-1) ?>">Prev</a>
-      <?php endif; ?>
-      <?php for ($i=$start;$i<=$end;$i++): ?>
-        <?php if ($i==$page): ?>
-          <span class="btn" style="background:#2a3038;cursor:default;"><?= $i ?></span>
-        <?php else: ?>
-          <a class="btn" href="<?= $base.'&page_num='.$i ?>"><?= $i ?></a>
-        <?php endif; ?>
-      <?php endfor; ?>
-      <?php if ($page < $totalPages): ?>
-        <a class="btn" href="<?= $base.'&page_num='.($page+1) ?>">Next</a>
-        <a class="btn" href="<?= $base.'&page_num='.$totalPages ?>">Last</a>
-      <?php endif; ?>
-    </div>
-  <?php endif; ?>
 </div>
 
 <!-- Password modal -->
@@ -485,8 +387,8 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
                style="width:100%;padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
       </div>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
-        <button class="btn" type="submit">Change</button>
-        <button class="btn js-close-pwd" type="button" style="background:#666;">Cancel</button>
+        <button class="btn btn-info btn-sm" type="submit">Change</button>
+        <button class="btn btn-sm js-close-pwd" type="button" style="background:#666;">Cancel</button>
       </div>
     </form>
   </div>
