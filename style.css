@@ -311,3 +311,9 @@ label.inline {
     font-size: 10px;
     opacity: 0.8;
 }
+
+.input-sm {
+    font-size: 13px;
+    padding: 6px 8px;
+    border-radius: 6px;
+}
