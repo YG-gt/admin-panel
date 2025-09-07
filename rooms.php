@@ -1,5 +1,5 @@
 <?php
-
+// rooms.php
 if (!function_exists('isLoggedIn')) { require __DIR__ . '/bootstrap.php'; }
 if (!isLoggedIn()) {
   echo '<div class="card"><p>Please log in to view this page.</p></div>';
@@ -13,46 +13,57 @@ $success = $_GET['success'] ?? null;
 function safe_json_decode($s){ $d = json_decode((string)$s, true); return is_array($d) ? $d : []; }
 function http_fail_msg(array $res, string $fallback='Request failed'){
     $code = (int)($res['http_code'] ?? 0);
-    $body = (string)($res['response'] ?? '');
-    $snippet = $body !== '' ? ' — '.$code.' / '.mb_substr($body,0,160) : ($code ? ' — '.$code : '');
-    return $fallback.$snippet;
+    $body = (string)($res['response'] ?? ($res['error'] ?? ''));
+    if ($body !== '') $body = mb_substr($body, 0, 300);
+    return $fallback . ($code ? " — HTTP $code" : '') . ($body !== '' ? " / $body" : '');
 }
 
 /* ---------------- Actions ---------------- */
 
-// Создание комнаты
+// 1) Create room / space
 if (($_POST['action'] ?? '') === 'create_room') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
     } else {
         $roomName = trim($_POST['room_name'] ?? '');
-        $roomType = ($_POST['room_type'] ?? 'private') === 'public' ? 'public' : 'private';
+        $visSel   = ($_POST['room_visibility'] ?? 'private') === 'public' ? 'public' : 'private';
+        $kind     = ($_POST['room_kind'] ?? 'room') === 'space' ? 'space' : 'room';
+
         if ($roomName === '') {
             $error = 'Please enter room name';
         } else {
-            $payload = json_encode([
+            // payload для обычной комнаты
+            $payload = [
                 'name'       => $roomName,
-                'preset'     => $roomType === 'public' ? 'public_chat' : 'private_chat',
-                'visibility' => $roomType,
-            ]);
+                'preset'     => $visSel === 'public' ? 'public_chat' : 'private_chat',
+                'visibility' => $visSel,
+            ];
+            // если Space — добавить creation_content.type = m.space
+            if ($kind === 'space') {
+                $payload['creation_content'] = ['type' => 'm.space'];
+                // для Space допустим preset private/public как выше
+            }
+
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_matrix/client/r0/createRoom',
                 'POST',
-                $payload,
+                json_encode($payload),
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
+
             if (($res['success'] ?? false) && (int)$res['http_code'] === 200) {
                 $rid = safe_json_decode($res['response'])['room_id'] ?? '(unknown)';
-                $success = 'Room created successfully. Room ID: '.htmlspecialchars($rid);
-                logAction('create room "'.$roomName.'" ('.$rid.')');
+                $success = ucfirst($kind) . ' created. ID: ' . htmlspecialchars($rid);
+                logAction('create '.$kind.' "'.$roomName.'" ('.$rid.')');
             } else {
-                $error = http_fail_msg($res, 'Failed to create room');
-                logAction('failed to create room "'.$roomName.'"');
+                $error = http_fail_msg($res, 'Failed to create '.$kind);
+                logAction('failed to create '.$kind.' "'.$roomName.'"');
             }
         }
     }
 }
 
+// 2) Invite user to room
 if (($_POST['action'] ?? '') === 'invite_to_room') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
@@ -80,6 +91,40 @@ if (($_POST['action'] ?? '') === 'invite_to_room') {
     }
 }
 
+// 3) Add child to space (parent=space, child=room/space)
+if (($_POST['action'] ?? '') === 'add_child_to_space') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid CSRF token';
+    } else {
+        $spaceId = trim($_POST['space_id'] ?? '');
+        $childId = trim($_POST['child_id'] ?? '');
+        $suggest = !empty($_POST['suggested']);
+        if ($spaceId === '' || $childId === '') {
+            $error = 'Please enter both Space ID and Child Room ID';
+        } else {
+            // Ставим state в SPACE: type m.space.child, state_key = childId
+            $body = [
+                'via'       => [MATRIX_DOMAIN],
+                'suggested' => $suggest,
+            ];
+            $res = makeMatrixRequest(
+                MATRIX_SERVER.'/_matrix/client/v3/rooms/'.rawurlencode($spaceId).'/state/m.space.child/'.rawurlencode($childId),
+                'PUT',
+                json_encode($body),
+                ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
+            );
+            if (($res['success'] ?? false) && (int)$res['http_code'] >= 200 && (int)$res['http_code'] < 300) {
+                $success = 'Added child '.htmlspecialchars($childId).' to space '.htmlspecialchars($spaceId);
+                logAction('space add child '.$childId.' -> '.$spaceId);
+            } else {
+                $error = http_fail_msg($res, 'Failed to add child to space');
+                logAction('space add child FAILED '.$childId.' -> '.$spaceId);
+            }
+        }
+    }
+}
+
+// 4) Bulk delete rooms (v2 async, с JSON-телом; fallback v1)
 if (($_POST['action'] ?? '') === 'bulk_rooms') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error='Invalid CSRF token';
@@ -90,15 +135,16 @@ if (($_POST['action'] ?? '') === 'bulk_rooms') {
         } else {
             $ok=$fail=0;
             foreach ($ids as $rid) {
-                // v2 async delete
+                // v2 async delete — ТРЕБУЕТ JSON-ТЕЛО
                 $res = makeMatrixRequest(
                     MATRIX_SERVER.'/_synapse/admin/v2/rooms/'.rawurlencode($rid).'/delete',
                     'POST',
                     json_encode(['block'=>false,'purge'=>true]),
                     ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
                 );
+
                 if (!($res['success'] ?? false) || (int)$res['http_code'] < 200 || (int)$res['http_code'] >= 300) {
-                    // fallback to v1
+                    // fallback на v1 DELETE (обычно без тела)
                     $res_v1 = makeMatrixRequest(
                         MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid),
                         'DELETE',
@@ -114,12 +160,13 @@ if (($_POST['action'] ?? '') === 'bulk_rooms') {
                     $ok++; logAction('delete room (v2) '.$rid);
                 }
             }
-            if ($fail===0) $success = "Deletion requested for $ok room(s).";
+            if ($fail===0) $success = "Deletion requested for $ok room(s) (async).";
             else           $error   = "Requested deletion: OK $ok, failed $fail.";
         }
     }
 }
 
+/* ---------------- Fetch list ---------------- */
 
 $r_page   = max(1,(int)($_GET['r_page']??1));
 $r_per_in = (int)($_GET['r_per_page'] ?? 50);
@@ -142,7 +189,6 @@ if (($res['success'] ?? false) && (int)$res['http_code']===200) {
 }
 $pages = max(1,(int)ceil(max(1,$total)/$r_per));
 ?>
-
 <?php if ($error): ?>
   <div class="card alert alert-error"><?= htmlspecialchars($error) ?></div>
 <?php endif; ?>
@@ -150,16 +196,21 @@ $pages = max(1,(int)ceil(max(1,$total)/$r_per));
   <div class="card alert alert-success"><?= htmlspecialchars($success) ?></div>
 <?php endif; ?>
 
-<!-- Create Room -->
+<!-- Create Room / Space -->
 <div class="card">
   <h2>Create Room</h2>
   <form method="POST" id="createRoomForm" style="margin-top:10px;">
     <input type="hidden" name="action" value="create_room">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
-    <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:10px;">
-      <input class="input" name="room_name" placeholder="Room name" required
+    <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;">
+      <input class="input" name="room_name" placeholder="Room/Space name" required
              style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-      <select class="input" name="room_type"
+      <select class="input" name="room_kind"
+              style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+        <option value="room">Room</option>
+        <option value="space">Space</option>
+      </select>
+      <select class="input" name="room_visibility"
               style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
         <option value="private">Private</option>
         <option value="public">Public</option>
@@ -181,6 +232,25 @@ $pages = max(1,(int)ceil(max(1,$total)/$r_per));
       <input class="input" name="invite_user_id" placeholder="@user:domain" required
              style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
       <button class="btn" type="submit">Invite</button>
+    </div>
+  </form>
+</div>
+
+<!-- Add room to space -->
+<div class="card">
+  <h2>Add Room to Space</h2>
+  <form method="POST" style="margin-top:10px;">
+    <input type="hidden" name="action" value="add_child_to_space">
+    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+    <div style="display:grid;grid-template-columns:2fr 2fr auto auto;gap:10px;align-items:center;">
+      <input class="input" name="space_id" placeholder="Space ID (e.g. !space:domain)" required
+             style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+      <input class="input" name="child_id" placeholder="Child room/space ID" required
+             style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+      <label style="display:flex;gap:8px;align-items:center;">
+        <input type="checkbox" name="suggested"> suggested
+      </label>
+      <button class="btn" type="submit">Add</button>
     </div>
   </form>
 </div>
@@ -212,7 +282,7 @@ $pages = max(1,(int)ceil(max(1,$total)/$r_per));
 
     <div style="display:flex; gap:10px; align-items:center; margin:10px 0;">
       <button class="btn" id="bulkBtn" disabled>Delete selected</button>
-      <div style="font-size:12px;opacity:.7">Synapse delete is asynchronous</div>
+      <div style="font-size:12px;opacity:.7">Synapse v2 delete is asynchronous</div>
     </div>
 
     <table style="width:100%;border-collapse:collapse">
