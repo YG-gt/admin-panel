@@ -127,40 +127,60 @@ if (($_POST['action'] ?? '') === 'add_child_to_space') {
 // 4) Bulk delete rooms (v2 async, с JSON-телом; fallback v1)
 if (($_POST['action'] ?? '') === 'bulk_rooms') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
-        $error='Invalid CSRF token';
+        $error = 'Invalid CSRF token';
     } else {
         $ids = array_filter((array)($_POST['room_ids'] ?? []), 'strlen');
         if (!$ids) {
             $error='No rooms selected';
         } else {
-            $ok=$fail=0;
+            $ok=0; $fail=0;
             foreach ($ids as $rid) {
-                // v2 async delete — ТРЕБУЕТ JSON-ТЕЛО
-                $res = makeMatrixRequest(
+                // 1) v2 async delete (preferred)
+                $payload = json_encode(['block'=>false,'purge'=>true], JSON_UNESCAPED_SLASHES);
+                $res_v2 = makeMatrixRequest(
                     MATRIX_SERVER.'/_synapse/admin/v2/rooms/'.rawurlencode($rid).'/delete',
                     'POST',
-                    json_encode(['block'=>false,'purge'=>true]),
+                    $payload,
                     ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
                 );
+                $done = ($res_v2['success'] ?? false) && (int)$res_v2['http_code']>=200 && (int)$res_v2['http_code']<300;
 
-                if (!($res['success'] ?? false) || (int)$res['http_code'] < 200 || (int)$res['http_code'] >= 300) {
-                    // fallback на v1 DELETE (обычно без тела)
-                    $res_v1 = makeMatrixRequest(
-                        MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid),
-                        'DELETE',
-                        null,
-                        ['Authorization: Bearer '.$_SESSION['admin_token']]
+                if (!$done) {
+                    // 2) v1 delete endpoint (POST)
+                    $res_v1_post = makeMatrixRequest(
+                        MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid).'/delete',
+                        'POST',
+                        $payload,
+                        ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
                     );
-                    if (($res_v1['success'] ?? false) && (int)$res_v1['http_code'] >= 200 && (int)$res_v1['http_code'] < 300) {
-                        $ok++; logAction('delete room (v1) '.$rid);
+                    $done = ($res_v1_post['success'] ?? false) && (int)$res_v1_post['http_code']>=200 && (int)$res_v1_post['http_code']<300;
+
+                    if (!$done) {
+                        // 3) v1 legacy DELETE with query params (no body)
+                        $res_v1_del = makeMatrixRequest(
+                            MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid).'?block=false&purge=true',
+                            'DELETE',
+                            null,
+                            ['Authorization: Bearer '.$_SESSION['admin_token']]
+                        );
+                        $done = ($res_v1_del['success'] ?? false) && (int)$res_v1_del['http_code']>=200 && (int)$res_v1_del['http_code']<300;
+
+                        if ($done) {
+                            logAction('delete room (v1 DELETE) '.$rid);
+                        } else {
+                            $fail++;
+                            $msg = $res_v1_del['response'] ?? $res_v1_del['error'] ?? $res_v1_post['response'] ?? $res_v1_post['error'] ?? $res_v2['response'] ?? $res_v2['error'] ?? 'unknown';
+                            logAction('delete room FAILED '.$rid.' '.$msg);
+                        }
                     } else {
-                        $fail++; logAction('delete room FAILED '.$rid.' '.($res_v1['response']??$res_v1['error']??$res['response']??$res['error']??''));
+                        $ok++; logAction('delete room (v1 POST) '.$rid);
                     }
                 } else {
-                    $ok++; logAction('delete room (v2) '.$rid);
+                    $ok++; logAction('delete room (v2 POST) '.$rid);
                 }
             }
-            if ($fail===0) $success = "Deletion requested for $ok room(s) (async).";
+
+            if ($fail===0) $success = "Deletion requested for $ok room(s).";
             else           $error   = "Requested deletion: OK $ok, failed $fail.";
         }
     }
