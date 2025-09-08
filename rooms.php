@@ -32,16 +32,14 @@ if (($_POST['action'] ?? '') === 'create_room') {
         if ($roomName === '') {
             $error = 'Please enter room name';
         } else {
-            // payload для обычной комнаты
             $payload = [
                 'name'       => $roomName,
                 'preset'     => $visSel === 'public' ? 'public_chat' : 'private_chat',
                 'visibility' => $visSel,
             ];
-            // если Space — добавить creation_content.type = m.space
             if ($kind === 'space') {
+                // превращаем создаваемую комнату в Space
                 $payload['creation_content'] = ['type' => 'm.space'];
-                // для Space допустим preset private/public как выше
             }
 
             $res = makeMatrixRequest(
@@ -102,7 +100,6 @@ if (($_POST['action'] ?? '') === 'add_child_to_space') {
         if ($spaceId === '' || $childId === '') {
             $error = 'Please enter both Space ID and Child Room ID';
         } else {
-            // Ставим state в SPACE: type m.space.child, state_key = childId
             $body = [
                 'via'       => [MATRIX_DOMAIN],
                 'suggested' => $suggest,
@@ -124,7 +121,7 @@ if (($_POST['action'] ?? '') === 'add_child_to_space') {
     }
 }
 
-// 4) Bulk delete rooms (v2 async, с JSON-телом; fallback v1)
+// 4) Bulk delete rooms (v2 POST, fallback v1 POST, затем v1 DELETE c query)
 if (($_POST['action'] ?? '') === 'bulk_rooms') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
@@ -135,8 +132,9 @@ if (($_POST['action'] ?? '') === 'bulk_rooms') {
         } else {
             $ok=0; $fail=0;
             foreach ($ids as $rid) {
-                // 1) v2 async delete (preferred)
                 $payload = json_encode(['block'=>false,'purge'=>true], JSON_UNESCAPED_SLASHES);
+
+                // 1) v2 async delete
                 $res_v2 = makeMatrixRequest(
                     MATRIX_SERVER.'/_synapse/admin/v2/rooms/'.rawurlencode($rid).'/delete',
                     'POST',
@@ -146,7 +144,7 @@ if (($_POST['action'] ?? '') === 'bulk_rooms') {
                 $done = ($res_v2['success'] ?? false) && (int)$res_v2['http_code']>=200 && (int)$res_v2['http_code']<300;
 
                 if (!$done) {
-                    // 2) v1 delete endpoint (POST)
+                    // 2) v1 POST /delete
                     $res_v1_post = makeMatrixRequest(
                         MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid).'/delete',
                         'POST',
@@ -156,7 +154,7 @@ if (($_POST['action'] ?? '') === 'bulk_rooms') {
                     $done = ($res_v1_post['success'] ?? false) && (int)$res_v1_post['http_code']>=200 && (int)$res_v1_post['http_code']<300;
 
                     if (!$done) {
-                        // 3) v1 legacy DELETE with query params (no body)
+                        // 3) v1 DELETE с query-параметрами (без тела)
                         $res_v1_del = makeMatrixRequest(
                             MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid).'?block=false&purge=true',
                             'DELETE',
@@ -166,7 +164,7 @@ if (($_POST['action'] ?? '') === 'bulk_rooms') {
                         $done = ($res_v1_del['success'] ?? false) && (int)$res_v1_del['http_code']>=200 && (int)$res_v1_del['http_code']<300;
 
                         if ($done) {
-                            logAction('delete room (v1 DELETE) '.$rid);
+                            $ok++; logAction('delete room (v1 DELETE) '.$rid);
                         } else {
                             $fail++;
                             $msg = $res_v1_del['response'] ?? $res_v1_del['error'] ?? $res_v1_post['response'] ?? $res_v1_post['error'] ?? $res_v2['response'] ?? $res_v2['error'] ?? 'unknown';
