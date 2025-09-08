@@ -17,44 +17,70 @@ function http_fail_msg(array $res, string $fallback='Request failed'){
     if ($body !== '') $body = mb_substr($body, 0, 300);
     return $fallback . ($code ? " — HTTP $code" : '') . ($body !== '' ? " / $body" : '');
 }
+function admin_json_request(string $url, string $method, ?string $jsonBody, string $token): array {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CUSTOMREQUEST  => $method,
+        CURLOPT_HTTPHEADER     => array_filter([
+            'Authorization: Bearer '.$token,
+            'Accept: application/json',
+            'Expect:',
+            $jsonBody !== null ? 'Content-Type: application/json; charset=utf-8' : null,
+            $jsonBody !== null ? 'Content-Length: '.strlen($jsonBody) : null,
+        ]),
+        // ВАЖНО: передаём *строку*, не массив
+        CURLOPT_POSTFIELDS     => $jsonBody !== null ? $jsonBody : null,
+        CURLOPT_TIMEOUT        => 30,
+    ]);
+    $resp = curl_exec($ch);
+    $err  = curl_error($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
+    return [
+        'success'   => $resp !== false,
+        'http_code' => $code,
+        'response'  => $resp !== false ? $resp : '',
+        'error'     => $resp === false ? $err : '',
+    ];
+}
+
 function delete_room_cascade(string $rid, string $token): array {
-    // JSON-тело для v2/v1 POST
     $payload = json_encode(['block'=>false,'purge'=>true], JSON_UNESCAPED_SLASHES);
 
-    // 1) v2 POST /_synapse/admin/v2/rooms/{rid}/delete
-    $r = makeMatrixRequest(
+    // v2 POST
+    $r = admin_json_request(
         MATRIX_SERVER.'/_synapse/admin/v2/rooms/'.rawurlencode($rid).'/delete',
         'POST',
         $payload,
-        ['Content-Type: application/json','Authorization: Bearer '.$token]
+        $token
     );
-    if (($r['success'] ?? false) && (int)$r['http_code']>=200 && (int)$r['http_code']<300) {
+    if (($r['success'] ?? false) && $r['http_code'] >= 200 && $r['http_code'] < 300) {
         return ['ok'=>true,'ver'=>'v2 POST','res'=>$r];
     }
 
-    // 2) v1 POST /_synapse/admin/v1/rooms/{rid}/delete
-    $r1 = makeMatrixRequest(
+    // v1 POST
+    $r1 = admin_json_request(
         MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid).'/delete',
         'POST',
         $payload,
-        ['Content-Type: application/json','Authorization: Bearer '.$token]
+        $token
     );
-    if (($r1['success'] ?? false) && (int)$r1['http_code']>=200 && (int)$r1['http_code']<300) {
+    if (($r1['success'] ?? false) && $r1['http_code'] >= 200 && $r1['http_code'] < 300) {
         return ['ok'=>true,'ver'=>'v1 POST','res'=>$r1];
     }
 
-    // 3) v1 DELETE /_synapse/admin/v1/rooms/{rid}?block=false&purge=true (без тела)
-    $r2 = makeMatrixRequest(
+    // v1 DELETE с query (без тела!)
+    $r2 = admin_json_request(
         MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid).'?block=false&purge=true',
         'DELETE',
         null,
-        ['Authorization: Bearer '.$token]
+        $token
     );
-    if (($r2['success'] ?? false) && (int)$r2['http_code']>=200 && (int)$r2['http_code']<300) {
+    if (($r2['success'] ?? false) && $r2['http_code'] >= 200 && $r2['http_code'] < 300) {
         return ['ok'=>true,'ver'=>'v1 DELETE','res'=>$r2];
     }
 
-    // провал
     return ['ok'=>false,'ver'=>'fail','res'=>$r2 ?: ($r1 ?: $r)];
 }
 
