@@ -376,6 +376,9 @@ if (($uRes['success'] ?? false) && (int)$uRes['http_code'] === 200) {
       $mem = (int)($r['joined_members'] ?? 0);
       $enc = !empty($r['encryption']) ? 'yes' : 'no';
       $creator = (string)($r['creator'] ?? '—');
+        if ($creator !== '—') {
+            $creator = preg_replace('/:' . preg_quote(MATRIX_DOMAIN, '/') . '$/', '', $creator);
+  }
     ?>
     <tr>
       <td title="<?= htmlspecialchars($name) ?>"><?= htmlspecialchars($name) ?></td>
