@@ -201,7 +201,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'change_user_type') {
         $uid = (string)($_POST['user_id'] ?? '');
         $new = trim((string)($_POST['new_user_type'] ?? '')); // '' | 'moderator' | 'teamlead'
         if ($uid !== '') {
-            // нормализуем: '' -> null
+            // '' -> null (сброс к дефолтному типу)
             $payload = ['user_type' => ($new === '' ? null : $new)];
             $res = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/users/'.rawurlencode($uid),
@@ -214,6 +214,65 @@ if (isset($_POST['action']) && $_POST['action'] === 'change_user_type') {
                 users_redirect_with_state(['success'=>'User type updated']);
             } else {
                 $error = http_fail_msg($res, 'Failed to update user type');
+            }
+        }
+    }
+}
+
+/* ---------- NEW: Send Server Notice ---------- */
+if (isset($_POST['action']) && $_POST['action'] === 'send_notice') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $error = 'Invalid CSRF token';
+    } else {
+        $msg    = trim($_POST['notice_body'] ?? '');
+        $target = $_POST['target'] ?? '';
+        if ($msg === '') {
+            $error = 'Message cannot be empty';
+        } else {
+            // собрать список получателей
+            $recipients = [];
+            if ($target === 'all') {
+                $from = 0; $limit = 500; $guard = 0;
+                while (true) {
+                    $url = MATRIX_SERVER."/_synapse/admin/v2/users?limit={$limit}&from={$from}";
+                    $res = makeMatrixRequest($url, 'GET', null, ['Authorization: Bearer '.$_SESSION['admin_token']]);
+                    if (!($res['success'] ?? false) || (int)$res['http_code'] !== 200) break;
+                    $data  = json_decode($res['response'], true) ?: [];
+                    $chunk = $data['users'] ?? [];
+                    foreach ($chunk as $u) {
+                        if (empty($u['deactivated']) && !empty($u['name'])) {
+                            $recipients[] = $u['name'];
+                        }
+                    }
+                    if (count($chunk) < $limit) break;
+                    $from += $limit;
+                    $guard++;
+                    if ($guard > 50) break; // предохранитель
+                }
+            } else {
+                $recipients[] = $target;
+            }
+
+            if (!$recipients) {
+                $error = 'No recipients found';
+            } else {
+                $sent = 0; $fail = 0;
+                foreach ($recipients as $uid) {
+                    $payload = json_encode([
+                        'user_id' => $uid,
+                        'content' => ['msgtype' => 'm.text', 'body' => $msg],
+                    ]);
+                    $txnId = bin2hex(random_bytes(8)); // короткий idempotent txnId
+                    $r = makeMatrixRequest(
+                        MATRIX_SERVER.'/_synapse/admin/v1/send_server_notice/'.$txnId,
+                        'PUT',
+                        $payload,
+                        ['Content-Type: application/json', 'Authorization: Bearer '.$_SESSION['admin_token']]
+                    );
+                    if (($r['success'] ?? false) && (int)$r['http_code'] === 200) $sent++; else $fail++;
+                }
+                if ($fail === 0) $success = "Server notice sent to $sent recipient(s).";
+                else $error = "Sent: $sent, failed: $fail.";
             }
         }
     }
@@ -240,6 +299,23 @@ if (!empty($listRes['success']) && (int)$listRes['http_code']===200) {
     $error = $error ?: http_fail_msg($listRes, 'Failed to load users list');
 }
 $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
+
+/* ---------- prepare active users for Notice dropdown (first 500) ---------- */
+$activeUsers = [];
+$auRes = makeMatrixRequest(
+    MATRIX_SERVER.'/_synapse/admin/v2/users?limit=500&from=0',
+    'GET',
+    null,
+    ['Authorization: Bearer '.$_SESSION['admin_token']]
+);
+if (($auRes['success'] ?? false) && (int)$auRes['http_code'] === 200) {
+    $auData = json_decode($auRes['response'], true) ?: [];
+    foreach (($auData['users'] ?? []) as $u) {
+        if (empty($u['deactivated']) && !empty($u['name'])) {
+            $activeUsers[] = ['id' => $u['name'], 'label' => $u['displayname'] ?? $u['name']];
+        }
+    }
+}
 ?>
 
 <?php if ($error): ?>
@@ -272,6 +348,35 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
 
     <div style="margin-top:10px;">
       <button class="btn btn-sm" type="submit">Create</button>
+    </div>
+  </form>
+</div>
+
+<!-- NEW: Send Server Notice -->
+<div class="card">
+  <h2>Send Server Notice</h2>
+  <form method="post" style="margin-top:10px;">
+    <input type="hidden" name="action" value="send_notice">
+    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+
+    <div style="display:grid;grid-template-columns:1fr 3fr auto;gap:10px;align-items:start;">
+      <select class="input input-sm" name="target" required style="min-width:220px;">
+        <option value="" disabled selected>Select recipient…</option>
+        <option value="all">All active users</option>
+        <?php foreach ($activeUsers as $au): ?>
+          <option value="<?= htmlspecialchars($au['id']) ?>">
+            <?= htmlspecialchars($au['label']) ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+
+      <textarea class="input input-sm" name="notice_body" rows="2" placeholder="Message text…" required></textarea>
+
+      <button class="btn btn-info btn-sm" type="submit">Send</button>
+    </div>
+
+    <div style="font-size:12px;opacity:.7;margin-top:6px;">
+      Requires <code>server_notices.enabled: true</code> in homeserver.yaml.
     </div>
   </form>
 </div>
@@ -321,7 +426,6 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
         $created = !empty($u['creation_ts']) ? date('Y-m-d H:i', $u['creation_ts']/1000) : '—';
         $userTypeVal = $u['user_type'] ?? '';
 
-        // Type label for display column
         if ($isAdm) {
             $typeLabel = '<span style="color:#00ff88">Admin</span>';
         } elseif ($userTypeVal === 'moderator') {
@@ -383,7 +487,7 @@ $totalPages = max(1, (int)ceil(max(1, $total) / $perPage));
               <?php endif; ?>
             <?php endif; ?>
 
-            <!-- New: inline change user type -->
+            <!-- inline change user type -->
             <form method="post" style="display:flex;gap:6px;align-items:center;">
               <input type="hidden" name="action" value="change_user_type">
               <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
