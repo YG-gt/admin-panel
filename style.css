@@ -317,3 +317,72 @@ label.inline {
     padding: 6px 8px;
     border-radius: 6px;
 }
+
+.rooms-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+.rooms-table th,
+.rooms-table td {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
+
+.rooms-table th:nth-child(1),
+.rooms-table td:nth-child(1) {
+    width: 18%;
+}
+
+/* Name */
+.rooms-table th:nth-child(2),
+.rooms-table td:nth-child(2) {
+    width: 26%;
+}
+
+/* Room ID */
+.rooms-table th:nth-child(3),
+.rooms-table td:nth-child(3) {
+    width: 10%;
+}
+
+/* Type */
+.rooms-table th:nth-child(4),
+.rooms-table td:nth-child(4) {
+    width: 10%;
+}
+
+/* Visibility */
+.rooms-table th:nth-child(5),
+.rooms-table td:nth-child(5) {
+    width: 8%;
+}
+
+/* Members */
+.rooms-table th:nth-child(6),
+.rooms-table td:nth-child(6) {
+    width: 8%;
+}
+
+/* Encrypted */
+.rooms-table th:nth-child(7),
+.rooms-table td:nth-child(7) {
+    width: 14%;
+}
+
+/* Creator */
+.rooms-table th:nth-child(8),
+.rooms-table td:nth-child(8) {
+    width: 6%;
+    text-align: right;
+}
+
+/* Actions */
+
+.rooms-table .btn.btn-danger.btn-sm {
+    padding: 6px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+}

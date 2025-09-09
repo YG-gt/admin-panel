@@ -354,51 +354,34 @@ if (($uRes['success'] ?? false) && (int)$uRes['http_code'] === 200) {
 
   <div style="opacity:.7;margin:8px 0;">Showing <?= count($rooms) ?> of <?= $total ?> rooms</div>
 
-  <table style="width:100%;border-collapse:collapse">
-    <thead>
-      <tr style="border-bottom:1px solid #30363D;color:#58A6FF">
-        <th style="padding:10px;text-align:left">Name</th>
-        <th style="padding:10px;text-align:left">Room ID</th>
-        <th style="padding:10px;text-align:left">Type</th>
-        <th style="padding:10px;text-align:left">Visibility</th>
-        <th style="padding:10px;text-align:left">Members</th>
-        <th style="padding:10px;text-align:left">Encrypted</th>
-        <th style="padding:10px;text-align:left">Creator</th>
-        <th style="padding:10px;text-align:left">Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      <?php if (!$rooms): ?>
-        <tr><td colspan="8" style="padding:14px;opacity:.7;text-align:center">No rooms</td></tr>
-      <?php else: foreach ($rooms as $r):
-        $rid = (string)($r['room_id'] ?? '');
-        $name = (string)($r['name'] ?? '(no name)');
-        $rtype = (string)($r['room_type'] ?? 'room');
-        $vis = ($r['public']??false) ? 'public' : (string)($r['join_rules'] ?? 'invite');
-        $mem = (int)($r['joined_members'] ?? 0);
-        $enc = !empty($r['encryption']) ? 'yes' : 'no';
-        $creator = (string)($r['creator'] ?? '—');
-      ?>
-      <tr style="border-bottom:1px solid #30363D">
-        <td style="padding:10px"><?= htmlspecialchars($name) ?></td>
-        <td style="padding:10px;font-family:monospace"><?= htmlspecialchars($rid) ?></td>
-        <td style="padding:10px"><?= htmlspecialchars($rtype) ?></td>
-        <td style="padding:10px"><?= htmlspecialchars($vis) ?></td>
-        <td style="padding:10px"><?= $mem ?></td>
-        <td style="padding:10px"><?= $enc ?></td>
-        <td style="padding:10px"><?= htmlspecialchars($creator) ?></td>
-        <td style="padding:10px">
-          <form method="POST" class="js-confirm-form" data-confirm="Delete this room? This will purge history.">
-            <input type="hidden" name="action" value="delete_room">
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
-            <input type="hidden" name="room_id" value="<?= htmlspecialchars($rid) ?>">
-            <button class="btn btn-danger btn-sm" type="submit">Delete</button>
-          </form>
-        </td>
-      </tr>
-      <?php endforeach; endif; ?>
-    </tbody>
-  </table>
+<table class="rooms-table">
+  <thead> ... </thead>
+  <tbody>
+    <?php foreach ($rooms as $r): 
+      $rid = (string)($r['room_id'] ?? '');
+      $name = (string)($r['name'] ?? '(no name)');
+      $creator = (string)($r['creator'] ?? '—');
+    ?>
+    <tr>
+      <td title="<?= htmlspecialchars($name) ?>"><?= htmlspecialchars($name) ?></td>
+      <td style="font-family:monospace" title="<?= htmlspecialchars($rid) ?>"><?= htmlspecialchars($rid) ?></td>
+      <td><?= htmlspecialchars($rtype) ?></td>
+      <td><?= htmlspecialchars($vis) ?></td>
+      <td><?= $mem ?></td>
+      <td><?= $enc ?></td>
+      <td title="<?= htmlspecialchars($creator) ?>"><?= htmlspecialchars($creator) ?></td>
+      <td>
+        <form method="POST" class="js-confirm-form" data-confirm="Delete this room? This will purge history.">
+          <input type="hidden" name="action" value="delete_room">
+          <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+          <input type="hidden" name="room_id" value="<?= htmlspecialchars($rid) ?>">
+          <button class="btn btn-danger btn-sm" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    <?php endforeach; ?>
+  </tbody>
+</table>
 
   <?php if ($pages>1): ?>
     <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
