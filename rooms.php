@@ -355,11 +355,26 @@ if (($uRes['success'] ?? false) && (int)$uRes['http_code'] === 200) {
   <div style="opacity:.7;margin:8px 0;">Showing <?= count($rooms) ?> of <?= $total ?> rooms</div>
 
 <table class="rooms-table">
-  <thead> ... </thead>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Room ID</th>
+      <th>Type</th>
+      <th>Visibility</th>
+      <th>Members</th>
+      <th>Encrypted</th>
+      <th>Creator</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
   <tbody>
-    <?php foreach ($rooms as $r): 
+    <?php foreach ($rooms as $r):
       $rid = (string)($r['room_id'] ?? '');
       $name = (string)($r['name'] ?? '(no name)');
+      $rtype = (string)($r['room_type'] ?? 'room');
+      $vis = ($r['public']??false) ? 'public' : (string)($r['join_rules'] ?? 'invite');
+      $mem = (int)($r['joined_members'] ?? 0);
+      $enc = !empty($r['encryption']) ? 'yes' : 'no';
       $creator = (string)($r['creator'] ?? '—');
     ?>
     <tr>
@@ -382,6 +397,7 @@ if (($uRes['success'] ?? false) && (int)$uRes['http_code'] === 200) {
     <?php endforeach; ?>
   </tbody>
 </table>
+
 
   <?php if ($pages>1): ?>
     <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">

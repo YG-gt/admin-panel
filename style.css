@@ -318,6 +318,7 @@ label.inline {
     border-radius: 6px;
 }
 
+/* ---- Rooms table layout ---- */
 .rooms-table {
     table-layout: fixed;
     width: 100%;
@@ -333,13 +334,13 @@ label.inline {
 
 .rooms-table th:nth-child(1),
 .rooms-table td:nth-child(1) {
-    width: 18%;
+    width: 15%;
 }
 
 /* Name */
 .rooms-table th:nth-child(2),
 .rooms-table td:nth-child(2) {
-    width: 26%;
+    width: 24%;
 }
 
 /* Room ID */
@@ -369,13 +370,13 @@ label.inline {
 /* Encrypted */
 .rooms-table th:nth-child(7),
 .rooms-table td:nth-child(7) {
-    width: 14%;
+    width: 15%;
 }
 
 /* Creator */
 .rooms-table th:nth-child(8),
 .rooms-table td:nth-child(8) {
-    width: 6%;
+    width: 10%;
     text-align: right;
 }
 
