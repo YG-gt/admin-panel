@@ -18,11 +18,6 @@ function http_fail_msg(array $res, string $fallback='Request failed'){
     return $fallback . ($code ? " — HTTP $code" : '') . ($body !== '' ? " / $body" : '');
 }
 
-function is_space_room(array $r): bool {
-    $rt = strtolower((string)($r['room_type'] ?? ''));
-    return $rt === 'm.space' || $rt === 'space';
-}
-
 /* ---------------- Actions ---------------- */
 
 // 1) Create room / space
@@ -43,7 +38,6 @@ if (($_POST['action'] ?? '') === 'create_room') {
                 'visibility' => $visSel,
             ];
             if ($kind === 'space') {
-                // Space создаём с creation_content.type = m.space
                 $payload['creation_content'] = ['type' => 'm.space'];
             }
 
@@ -74,7 +68,7 @@ if (($_POST['action'] ?? '') === 'invite_to_room') {
         $inviteRoomId = trim($_POST['invite_room_id'] ?? '');
         $inviteUserId = trim($_POST['invite_user_id'] ?? '');
         if ($inviteRoomId === '' || $inviteUserId === '') {
-            $error = 'Please enter both Room ID and User ID';
+            $error = 'Please select both Room and User';
         } else {
             $payload = json_encode(['user_id' => $inviteUserId]);
             $res = makeMatrixRequest(
@@ -84,7 +78,7 @@ if (($_POST['action'] ?? '') === 'invite_to_room') {
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
             if (($res['success'] ?? false) && (int)$res['http_code'] === 200) {
-                $success = 'User '.htmlspecialchars($inviteUserId).' invited to room '.htmlspecialchars($inviteRoomId);
+                $success = 'User '.htmlspecialchars($inviteUserId).' invited to '.htmlspecialchars($inviteRoomId);
                 logAction('invite '.$inviteUserId.' to room '.$inviteRoomId);
             } else {
                 $error = http_fail_msg($res, 'Failed to invite user');
@@ -94,7 +88,7 @@ if (($_POST['action'] ?? '') === 'invite_to_room') {
     }
 }
 
-// 3) Add child to space (parent=space, child=room/space) — оставляем, но в списках ниже отфильтруем
+// 3) Add child to space (parent=space, child=room)
 if (($_POST['action'] ?? '') === 'add_child_to_space') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
@@ -116,7 +110,7 @@ if (($_POST['action'] ?? '') === 'add_child_to_space') {
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
             if (($res['success'] ?? false) && (int)$res['http_code'] >= 200 && (int)$res['http_code'] < 300) {
-                $success = 'Added ' . htmlspecialchars($childId) . ' to space ' . htmlspecialchars($spaceId);
+                $success = 'Added room '.htmlspecialchars($childId).' to space '.htmlspecialchars($spaceId);
                 logAction('space add child '.$childId.' -> '.$spaceId);
             } else {
                 $error = http_fail_msg($res, 'Failed to add child to space');
@@ -126,7 +120,7 @@ if (($_POST['action'] ?? '') === 'add_child_to_space') {
     }
 }
 
-// 4) Delete a room (single delete; JSON body обязательно, иначе M_NOT_JSON)
+// 4) Delete room (per-row), JSON body MUST NOT be empty
 if (($_POST['action'] ?? '') === 'delete_room') {
     if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
         $error = 'Invalid CSRF token';
@@ -135,48 +129,50 @@ if (($_POST['action'] ?? '') === 'delete_room') {
         if ($rid === '') {
             $error = 'Room ID missing';
         } else {
-            $body = ['block' => false, 'purge' => true];
-            $res = makeMatrixRequest(
+            $body = json_encode(['block'=>false,'purge'=>true]); 
+            // v2 async
+            $res_v2 = makeMatrixRequest(
                 MATRIX_SERVER.'/_synapse/admin/v2/rooms/'.rawurlencode($rid),
                 'DELETE',
-                json_encode($body),
+                $body,
                 ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
             );
-            $ok = ($res['success'] ?? false) && (int)$res['http_code'] >= 200 && (int)$res['http_code'] < 300;
+            $ok = ($res_v2['success'] ?? false) && (int)$res_v2['http_code']>=200 && (int)$res_v2['http_code']<300;
 
             if (!$ok) {
-                // Fallback на v1 (тоже DELETE + JSON)
-                $res = makeMatrixRequest(
+                // v1 sync
+                $res_v1 = makeMatrixRequest(
                     MATRIX_SERVER.'/_synapse/admin/v1/rooms/'.rawurlencode($rid),
                     'DELETE',
-                    json_encode($body),
+                    $body,
                     ['Content-Type: application/json','Authorization: Bearer '.$_SESSION['admin_token']]
                 );
-                $ok = ($res['success'] ?? false) && (int)$res['http_code'] >= 200 && (int)$res['http_code'] < 300;
+                $ok = ($res_v1['success'] ?? false) && (int)$res_v1['http_code']>=200 && (int)$res_v1['http_code']<300;
             }
 
             if ($ok) {
-                $success = 'Deletion requested for '.htmlspecialchars($rid).'.';
+                $success = 'Deletion requested for '.htmlspecialchars($rid);
                 logAction('delete room '.$rid);
             } else {
-                $error = http_fail_msg($res, 'Failed to delete room');
+                $error = http_fail_msg($res_v2 ?? $res_v1 ?? [], 'Failed to delete room');
                 logAction('delete room FAILED '.$rid);
             }
         }
     }
 }
 
-/* ---------------- Fetch list ---------------- */
+/* ---------------- Fetch lists (for selects & table) ---------------- */
 
+// Pagination
 $r_page   = max(1,(int)($_GET['r_page']??1));
 $r_per_in = (int)($_GET['r_per_page'] ?? 50);
 $r_per    = in_array($r_per_in, [10,50,100], true) ? $r_per_in : 50;
 $r_search = trim($_GET['r_search'] ?? '');
 $from     = ($r_page-1)*$r_per;
 
+// Table data
 $url = MATRIX_SERVER.'/_synapse/admin/v1/rooms?limit='.$r_per.'&from='.$from;
 if ($r_search!=='') $url .= '&search_term='.urlencode($r_search);
-
 $res = makeMatrixRequest($url,'GET',null,['Authorization: Bearer '.$_SESSION['admin_token']]);
 
 $rooms = []; $total = 0;
@@ -189,19 +185,42 @@ if (($res['success'] ?? false) && (int)$res['http_code']===200) {
 }
 $pages = max(1,(int)ceil(max(1,$total)/$r_per));
 
-/* --- разложим текущую страницу на Spaces и обычные комнаты --- */
-$spaces = [];
-$plainRooms = [];
-foreach ($rooms as $r) {
-    $rid  = (string)($r['room_id'] ?? '');
-    $name = (string)($r['name'] ?? '(no name)');
-    if ($rid === '') continue;
+// Dropdowns: all rooms (for selects)
+$allRoomsForSelect = [];
+$onlySpaces        = [];
+$onlyNormalRooms   = [];
 
-    if (is_space_room($r)) {
-        $spaces[] = ['room_id'=>$rid, 'name'=>$name];
-    } else {
-        $plainRooms[] = ['room_id'=>$rid, 'name'=>$name];
+$selRes = makeMatrixRequest(
+    MATRIX_SERVER.'/_synapse/admin/v1/rooms?limit=500',
+    'GET',
+    null,
+    ['Authorization: Bearer '.$_SESSION['admin_token']]
+);
+if (($selRes['success'] ?? false) && (int)$selRes['http_code']===200) {
+    $sd = safe_json_decode($selRes['response']);
+    $allRoomsForSelect = $sd['rooms'] ?? [];
+
+    foreach ($allRoomsForSelect as $rr) {
+        $rtype = (string)($rr['room_type'] ?? '');
+        if ($rtype === 'm.space' || $rtype === 'space' || $rtype === 'm.space.room') {
+            $onlySpaces[] = $rr;
+        } else {
+            $onlyNormalRooms[] = $rr;
+        }
     }
+}
+
+// Users list for invite
+$activeUsers = [];
+$uRes = makeMatrixRequest(
+    MATRIX_SERVER.'/_synapse/admin/v2/users?limit=500&deactivated=false',
+    'GET',
+    null,
+    ['Authorization: Bearer '.$_SESSION['admin_token']]
+);
+if (($uRes['success'] ?? false) && (int)$uRes['http_code'] === 200) {
+    $ud = safe_json_decode($uRes['response']);
+    $activeUsers = $ud['users'] ?? ($ud['results'] ?? []);
 }
 ?>
 <?php if ($error): ?>
@@ -214,7 +233,7 @@ foreach ($rooms as $r) {
 <!-- Create Room / Space -->
 <div class="card">
   <h2>Create Room</h2>
-  <form method="POST" id="createRoomForm" style="margin-top:10px;">
+  <form method="POST" style="margin-top:10px;">
     <input type="hidden" name="action" value="create_room">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
     <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;">
@@ -238,20 +257,43 @@ foreach ($rooms as $r) {
 <!-- Invite -->
 <div class="card">
   <h2>Invite User to Room</h2>
-  <form method="POST" id="inviteForm" style="margin-top:10px;">
+  <form method="POST" style="margin-top:10px;">
     <input type="hidden" name="action" value="invite_to_room">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
     <div style="display:grid;grid-template-columns:2fr 2fr auto;gap:10px;">
-      <input class="input" name="invite_room_id" placeholder="!room:domain or roomId" required
-             style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
-      <input class="input" name="invite_user_id" placeholder="@user:domain" required
-             style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+      <select class="input" name="invite_room_id"
+              style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9" required>
+        <option value="">— Select room/space —</option>
+        <?php if ($allRoomsForSelect): foreach ($allRoomsForSelect as $r):
+            $rid  = (string)($r['room_id'] ?? '');
+            $name = (string)($r['name'] ?? '(no name)');
+            $rtype= (string)($r['room_type'] ?? '');
+            $label= $name.' — '.$rid.($rtype ? ' ('.$rtype.')' : '');
+        ?>
+          <option value="<?= htmlspecialchars($rid) ?>"><?= htmlspecialchars($label) ?></option>
+        <?php endforeach; endif; ?>
+      </select>
+
+      <select class="input" name="invite_user_id"
+              style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9" required>
+        <option value="">— Select user —</option>
+        <?php if ($activeUsers): foreach ($activeUsers as $u):
+            $uid = (string)($u['name'] ?? $u['user_id'] ?? '');
+            if ($uid==='') continue;
+            if (!empty($u['deactivated'])) continue;
+            $dn  = (string)($u['displayname'] ?? '');
+            $label = $dn!=='' ? ($dn.' — '.$uid) : $uid;
+        ?>
+          <option value="<?= htmlspecialchars($uid) ?>"><?= htmlspecialchars($label) ?></option>
+        <?php endforeach; endif; ?>
+      </select>
+
       <button class="btn" type="submit">Invite</button>
     </div>
   </form>
 </div>
 
-<!-- Add room to space (dropdowns) -->
+<!-- Add room to space -->
 <div class="card">
   <h2>Add Room to Space</h2>
   <form method="POST" style="margin-top:10px;">
@@ -259,19 +301,25 @@ foreach ($rooms as $r) {
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
     <div style="display:grid;grid-template-columns:2fr 2fr auto auto;gap:10px;align-items:center;">
       <select class="input" name="space_id"
-              style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+              style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9" required>
         <option value="">— Select space —</option>
-        <?php foreach ($spaces as $sp): ?>
-          <option value="<?= htmlspecialchars($sp['room_id']) ?>"><?= htmlspecialchars($sp['name'].'  ('.$sp['room_id'].')') ?></option>
-        <?php endforeach; ?>
+        <?php if ($onlySpaces): foreach ($onlySpaces as $s):
+            $sid = (string)($s['room_id'] ?? '');
+            $nm  = (string)($s['name'] ?? '(no name)');
+        ?>
+          <option value="<?= htmlspecialchars($sid) ?>"><?= htmlspecialchars($nm.' — '.$sid) ?></option>
+        <?php endforeach; endif; ?>
       </select>
 
       <select class="input" name="child_id"
-              style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+              style="padding:10px;background:#181A20;border:1px solid #30363D;border-radius:6px;color:#C9D1D9" required>
         <option value="">— Select room —</option>
-        <?php foreach ($plainRooms as $pr): ?>
-          <option value="<?= htmlspecialchars($pr['room_id']) ?>"><?= htmlspecialchars($pr['name'].'  ('.$pr['room_id'].')') ?></option>
-        <?php endforeach; ?>
+        <?php if ($onlyNormalRooms): foreach ($onlyNormalRooms as $r):
+            $rid = (string)($r['room_id'] ?? '');
+            $nm  = (string)($r['name'] ?? '(no name)');
+        ?>
+          <option value="<?= htmlspecialchars($rid) ?>"><?= htmlspecialchars($nm.' — '.$rid) ?></option>
+        <?php endforeach; endif; ?>
       </select>
 
       <label style="display:flex;gap:8px;align-items:center;">
@@ -279,13 +327,13 @@ foreach ($rooms as $r) {
       </label>
       <button class="btn" type="submit">Add</button>
     </div>
-    <?php if (!$spaces): ?>
+    <?php if (!$onlySpaces): ?>
       <div style="color:#ff6666;margin-top:8px;">No spaces found on this page. Use search/pagination if needed.</div>
     <?php endif; ?>
   </form>
 </div>
 
-<!-- Rooms list (single delete per строке) -->
+<!-- List -->
 <div class="card">
   <h2>Rooms</h2>
 
@@ -325,7 +373,7 @@ foreach ($rooms as $r) {
       <?php else: foreach ($rooms as $r):
         $rid = (string)($r['room_id'] ?? '');
         $name = (string)($r['name'] ?? '(no name)');
-        $rtype = (string)($r['room_type'] ?? '');
+        $rtype = (string)($r['room_type'] ?? 'room');
         $vis = ($r['public']??false) ? 'public' : (string)($r['join_rules'] ?? 'invite');
         $mem = (int)($r['joined_members'] ?? 0);
         $enc = !empty($r['encryption']) ? 'yes' : 'no';
@@ -334,13 +382,13 @@ foreach ($rooms as $r) {
       <tr style="border-bottom:1px solid #30363D">
         <td style="padding:10px"><?= htmlspecialchars($name) ?></td>
         <td style="padding:10px;font-family:monospace"><?= htmlspecialchars($rid) ?></td>
-        <td style="padding:10px"><?= htmlspecialchars($rtype ?: 'room') ?></td>
+        <td style="padding:10px"><?= htmlspecialchars($rtype) ?></td>
         <td style="padding:10px"><?= htmlspecialchars($vis) ?></td>
         <td style="padding:10px"><?= $mem ?></td>
         <td style="padding:10px"><?= $enc ?></td>
         <td style="padding:10px"><?= htmlspecialchars($creator) ?></td>
         <td style="padding:10px">
-          <form method="POST" class="js-confirm-form" data-confirm="Delete this room? This will purge it from DB.">
+          <form method="POST" class="js-confirm-form" data-confirm="Delete this room? This will purge history.">
             <input type="hidden" name="action" value="delete_room">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
             <input type="hidden" name="room_id" value="<?= htmlspecialchars($rid) ?>">
